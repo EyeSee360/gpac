@@ -1215,12 +1215,16 @@ void gf_isom_cenc_get_default_info(GF_ISOFile *the_file, u32 trackNumber, u32 sa
 */
 GF_Err gf_isom_set_adobe_protection(GF_ISOFile *the_file, u32 trackNumber, u32 desc_index, u32 scheme_type, u32 scheme_version, Bool is_selective_enc, char *metadata, u32 len)
 {
-	GF_Err e;
 	GF_ProtectionInfoBox *sinf;
 
 	//setup generic protection
+#ifndef GPAC_DISABLE_ISOM_WRITE
+	GF_Err e;
 	e = gf_isom_set_protected_entry(the_file, trackNumber, desc_index, 1, 0, scheme_type, scheme_version, NULL, GF_FALSE, &sinf);
 	if (e) return e;
+#else
+	return GF_NOT_SUPPORTED;
+#endif
 
 	sinf->info->adkm = (GF_AdobeDRMKeyManagementSystemBox *)adkm_New();
 
