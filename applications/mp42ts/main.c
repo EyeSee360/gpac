@@ -1749,6 +1749,10 @@ static Bool open_source(M2TSSource *source, char *src, u32 carousel_rate, u32 mp
 		}
 }
 
+#ifdef GPAC_MEMORY_TRACKING
+static Bool enable_mem_tracker = GF_FALSE;
+#endif
+
 /*macro to keep retro compatibility with '=' and spaces in parse_args*/
 #define CHECK_PARAM(param) (!strnicmp(arg, param, strlen(param)) \
         && (   ((arg[strlen(param)] == '=') && (next_arg = arg+strlen(param)+1)) \
@@ -1863,6 +1867,7 @@ static GFINLINE GF_Err parse_args(int argc, char **argv, u32 *mux_rate, u32 *car
 		} else if (!strcmp(arg, "-mem-track")) {
 #ifdef GPAC_MEMORY_TRACKING
 			gf_sys_close();
+			enable_mem_tracker = GF_TRUE;
 			gf_sys_init(GF_TRUE);
 			gf_log_set_tool_level(GF_LOG_MEMORY, GF_LOG_INFO);
 #else
@@ -2692,6 +2697,13 @@ exit:
 
 	if (logfile) fclose(logfile);
 	gf_sys_close();
+
+#ifdef GPAC_MEMORY_TRACKING
+	if (enable_mem_tracker && (gf_memory_size() != 0)) {
+        gf_memory_print();
+		return 2;
+	}
+#endif
 	return 0;
 }
 

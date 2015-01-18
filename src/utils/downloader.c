@@ -147,6 +147,8 @@ struct __gf_download_session
 	/* Range information if needed for the download (cf flag) */
 	Bool needs_range;
 	u64 range_start, range_end;
+	
+	u32 connect_time, ssl_setup_time, reply_time, total_time_since_req, req_hdr_size, rsp_hdr_size;
 
 	/*0: GET
 	  1: HEAD
@@ -689,10 +691,8 @@ static void gf_dm_disconnect(GF_DownloadSession *sess, Bool force_close)
 	sess->connection_close = 0;
 
 	if (sess->status >= GF_NETIO_DISCONNECTED) {
-		if (force_close) {
-			if (sess->use_cache_file) {
-				gf_cache_close_write_cache(sess->cache_entry, sess, 0);
-			}
+		if (force_close && sess->use_cache_file && sess->cache_entry) {
+			gf_cache_close_write_cache(sess->cache_entry, sess, 0);
 		}
 		return;
 	}
@@ -869,7 +869,7 @@ static s32 gf_dm_parse_protocol(const char * url, GF_URL_Info * info) {
 
 GF_EXPORT
 GF_Err gf_dm_get_url_info(const char * url, GF_URL_Info * info, const char * baseURL) {
-	char *tmp, *tmp_url, *current_pos, *urlConcatenateWithBaseURL;
+	char *tmp, *tmp_url, *current_pos, *urlConcatenateWithBaseURL, *ipv6;
 	char * copyOfUrl;
 	s32 proto_offset;
 	gf_dm_url_info_del(info);
@@ -952,7 +952,10 @@ GF_Err gf_dm_get_url_info(const char * url, GF_URL_Info * info, const char * bas
 		info->server_name = gf_strdup(tmp_url);
 	}
 
-	tmp = strrchr(current_pos, ':');
+	//scan for port number after IPv6 adress ']' end char
+	ipv6 = strrchr(current_pos, ']');
+	tmp = strrchr(ipv6 ? ipv6 : current_pos, ':');
+
 	if (tmp) {
 		info->port = atoi(tmp+1);
 		tmp[0] = 0;
@@ -1294,6 +1297,7 @@ static void gf_dm_connect(GF_DownloadSession *sess)
 	GF_LOG(GF_LOG_INFO, GF_LOG_NETWORK, ("[HTTP] Connecting to %s:%d\n", proxy, proxy_port));
 
 	if (sess->status == GF_NETIO_SETUP) {
+		u64 now  =gf_sys_clock_high_res();
 		e = gf_sk_connect(sess->sock, (char *) proxy, proxy_port, (char *)ip);
 
 		/*retry*/
@@ -1311,6 +1315,7 @@ static void gf_dm_connect(GF_DownloadSession *sess)
 			return;
 		}
 
+		sess->connect_time = (u32) (gf_sys_clock_high_res() - now);
 		sess->status = GF_NETIO_CONNECTED;
         GF_LOG(GF_LOG_INFO, GF_LOG_NETWORK, ("[HTTP] Connected to %s:%d\n", proxy, proxy_port));
 		gf_dm_sess_notify_state(sess, GF_NETIO_CONNECTED, GF_OK);
@@ -1320,6 +1325,7 @@ static void gf_dm_connect(GF_DownloadSession *sess)
 
 #ifdef GPAC_HAS_SSL
 	if (!sess->ssl && (sess->flags & GF_DOWNLOAD_SESSION_USE_SSL)) {
+		u64 now  =gf_sys_clock_high_res();
 		if (!sess->dm->ssl_ctx)
 			ssl_init(sess->dm, 0);
 		/*socket is connected, configure SSL layer*/
@@ -1369,6 +1375,8 @@ static void gf_dm_connect(GF_DownloadSession *sess)
 					gf_dm_sess_notify_state(sess, sess->status, sess->last_error);
 				}
 			}
+
+			sess->ssl_setup_time = (u32) (gf_sys_clock_high_res() - now);
 		}
 	}
 #endif
@@ -1652,7 +1660,10 @@ retry_cache:
 				goto retry_cache;
 			}
 		}
-		if (test) fclose(test);
+		if (test) {
+			fclose(test);
+			gf_delete_file(szTemp);
+		}
 	}
 
 	opt = cfg ? gf_cfg_get_key(cfg, "Downloader", "MaxRate") : NULL;
@@ -1968,7 +1979,9 @@ static GFINLINE void gf_dm_data_received(GF_DownloadSession *sess, u8 *payload, 
 			GF_LOG(GF_LOG_DEBUG, GF_LOG_NETWORK,
 			       ("[CACHE] url %s saved as %s\n", gf_cache_get_url(sess->cache_entry), gf_cache_get_cache_filename(sess->cache_entry)));
 		}
-		GF_LOG(GF_LOG_INFO, GF_LOG_NETWORK, ("[HTTP] url %s downloaded in "LLU" us (%d kbps) (%d us since request)\n", gf_cache_get_url(sess->cache_entry), gf_sys_clock_high_res() - sess->start_time, 8*sess->bytes_per_sec/1024, gf_sys_clock_high_res() - sess->request_start_time ));
+		sess->total_time_since_req = (u32) (gf_sys_clock_high_res() - sess->request_start_time);
+
+		GF_LOG(GF_LOG_INFO, GF_LOG_NETWORK, ("[HTTP] url %s downloaded in "LLU" us (%d kbps) (%d us since request)\n", gf_cache_get_url(sess->cache_entry), gf_sys_clock_high_res() - sess->start_time, 8*sess->bytes_per_sec/1024, sess->total_time_since_req ));
 	}
 
 	if (rewrite_size && sess->chunked) {
@@ -2101,15 +2114,6 @@ static GFINLINE u32 http_skip_space(char *val)
 	u32 ret = 0;
 	while (val[ret] == ' ') ret+=1;
 	return ret;
-}
-
-static GFINLINE char *http_is_header(char *line, char *header_name)
-{
-	char *res;
-	if (strnicmp(line, header_name, strlen(header_name))) return NULL;
-	res = line + strlen(header_name);
-	while ((res[0] == ':') || (res[0] == ' ')) res+=1;
-	return res;
 }
 
 /*!
@@ -2327,6 +2331,7 @@ static GF_Err http_send_headers(GF_DownloadSession *sess, char * sHTTP) {
 		}
 
 		sess->request_start_time = gf_sys_clock_high_res();
+		sess->req_hdr_size = len+par.size;
 
 #ifdef GPAC_HAS_SSL
 		if (sess->ssl) {
@@ -2341,18 +2346,19 @@ static GF_Err http_send_headers(GF_DownloadSession *sess, char * sHTTP) {
 		GF_LOG(GF_LOG_INFO, GF_LOG_NETWORK, ("[HTTP] Sending request %s\n\n", tmp_buf));
 		gf_free(tmp_buf);
 	} else {
+		u32 len = (u32) strlen(sHTTP);
 
 		sess->request_start_time = gf_sys_clock_high_res();
+		sess->req_hdr_size = len;
 
 #ifdef GPAC_HAS_SSL
 		if (sess->ssl) {
-			u32 len = (u32) strlen(sHTTP);
 			e = GF_OK;
 			if (len != SSL_write(sess->ssl, sHTTP, len))
 				e = GF_IP_NETWORK_FAILURE;
 		} else
 #endif
-			e = gf_sk_send(sess->sock, sHTTP, (u32) strlen(sHTTP));
+			e = gf_sk_send(sess->sock, sHTTP, len);
 
 #ifndef GPAC_DISABLE_LOG
 		if (e) {
@@ -2487,6 +2493,15 @@ static void notify_headers(GF_DownloadSession *sess, char * sHTTP, s32 bytesRead
 		par.msg_type = GF_NETIO_PARSE_HEADER;
 		gf_dm_sess_user_io(sess, &par);
 	}
+
+	if (sHTTP) {
+		sHTTP[bytesRead]=0;
+		par.error = 0;
+		par.data = sHTTP + BodyStart;
+		par.size = (u32) strlen(par.data);
+		par.msg_type = GF_NETIO_DATA_EXCHANGE;
+		gf_dm_sess_user_io(sess, &par);
+	}
 }
 
 /*!
@@ -2506,6 +2521,7 @@ static GF_Err wait_for_header_and_parse(GF_DownloadSession *sess, char * sHTTP)
 	char comp[400];
 	GF_Err e;
 	char * new_location;
+	const char * mime_type;
 	assert( sess->status == GF_NETIO_WAIT_FOR_REPLY );
 	bytesRead = res = 0;
 	new_location = NULL;
@@ -2581,6 +2597,9 @@ static GF_Err wait_for_header_and_parse(GF_DownloadSession *sess, char * sHTTP)
 	sHTTP[BodyStart-1] = 0;
 	GF_LOG(GF_LOG_INFO, GF_LOG_NETWORK, ("[HTTP] %s\n\n", sHTTP));
 
+	sess->reply_time = (u32) (gf_sys_clock_high_res() - sess->request_start_time);
+	sess->rsp_hdr_size = BodyStart;
+
 	LinePos = gf_token_get_line(sHTTP, 0, bytesRead, buf, 1024);
 	Pos = gf_token_get(buf, 0, " \t\r\n", comp, 400);
 
@@ -2644,29 +2663,29 @@ static GF_Err wait_for_header_and_parse(GF_DownloadSession *sess, char * sHTTP)
 
 		}
 		else if (!stricmp(hdrp->name, "Content-Type")) {
-			char * mime_type = gf_strdup(hdrp->value);
+			char *mime = gf_strdup(hdrp->value);
 			while (1) {
-				u32 len = (u32) strlen(mime_type);
-				char c = len ? mime_type[len-1] : 0;
+				u32 len = (u32) strlen(mime);
+				char c = len ? mime[len-1] : 0;
 				if ((c=='\r') || (c=='\n')) {
-					mime_type[len-1] = 0;
+					mime[len-1] = 0;
 				} else {
 					break;
 				}
 			}
-			val = strchr(mime_type, ';');
+			val = strchr(mime, ';');
 			if (val) val[0] = 0;
 
-			strlwr(mime_type);
+			strlwr(mime);
 			if (rsp_code<300) {
 				if (sess->cache_entry) {
-					gf_cache_set_mime_type(sess->cache_entry, mime_type);
+					gf_cache_set_mime_type(sess->cache_entry, mime);
 				} else {
-					sess->mime_type = mime_type;
-					mime_type = NULL;
+					sess->mime_type = mime;
+					mime = NULL;
 				}
 			}
-			if (mime_type) gf_free(mime_type);
+			if (mime) gf_free(mime);
 		}
 		else if (!stricmp(hdrp->name, "Content-Range")) {
 			range = 1;
@@ -2956,7 +2975,7 @@ static GF_Err wait_for_header_and_parse(GF_DownloadSession *sess, char * sHTTP)
 		goto exit;
 	}
 
-	notify_headers(sess, sHTTP, bytesRead, BodyStart);
+	notify_headers(sess, NULL, bytesRead, BodyStart);
 
 	if (sess->http_read_type != GET)
 		sess->use_cache_file = 0;
@@ -2966,58 +2985,61 @@ static GF_Err wait_for_header_and_parse(GF_DownloadSession *sess, char * sHTTP)
 		gf_dm_sess_notify_state(sess, GF_NETIO_DATA_TRANSFERED, GF_OK);
 		sess->http_read_type = 0;
 		return GF_OK;
+
+
 	}
-	{
-		const char * mime_type = gf_cache_get_mime_type(sess->cache_entry);
-		if (!ContentLength && mime_type && ((strstr(mime_type, "ogg") || (!strcmp(mime_type, "audio/mpeg"))))) {
-			if (0 == sess->icy_metaint)
-				sess->icy_metaint = -1;
-			sess->use_cache_file = 0;
-		}
+
+
+	mime_type = gf_cache_get_mime_type(sess->cache_entry);
+	if (!ContentLength && mime_type && ((strstr(mime_type, "ogg") || (!strcmp(mime_type, "audio/mpeg"))))) {
+		if (0 == sess->icy_metaint)
+			sess->icy_metaint = -1;
+		sess->use_cache_file = 0;
+	}
 
 #ifndef GPAC_DISABLE_LOGS
-		if (e) {
-			GF_LOG(GF_LOG_ERROR, GF_LOG_NETWORK, ("[HTTP] Error connecting to %s: %s\n", sess->server_name, gf_error_to_string(e) ) );
-		} else {
-			GF_LOG(GF_LOG_INFO, GF_LOG_NETWORK, ("[HTTP] Connected to %s\n", sess->server_name ) );
-		}
+	if (e) {
+		GF_LOG(GF_LOG_ERROR, GF_LOG_NETWORK, ("[HTTP] Error processing rely from %s: %s\n", sess->server_name, gf_error_to_string(e) ) );
+	} else {
+		GF_LOG(GF_LOG_DEBUG, GF_LOG_NETWORK, ("[HTTP] Reply processed from %s\n", sess->server_name ) );
+	}
 #endif
 
-		/*some servers may reply without content length, but we MUST have it*/
-		if (e) goto exit;
-		if (sess->icy_metaint != 0) {
-			assert( ! sess->use_cache_file );
-			GF_LOG(GF_LOG_INFO, GF_LOG_NETWORK, ("[HTTP] ICY protocol detected\n"));
-			if (mime_type && !stricmp(mime_type, "video/nsv")) {
-				gf_cache_set_mime_type(sess->cache_entry, "audio/aac");
-			}
-			sess->icy_bytes = 0;
+	/*some servers may reply without content length, but we MUST have it*/
+	if (e) goto exit;
+	if (sess->icy_metaint != 0) {
+		assert( ! sess->use_cache_file );
+		GF_LOG(GF_LOG_INFO, GF_LOG_NETWORK, ("[HTTP] ICY protocol detected\n"));
+		if (mime_type && !stricmp(mime_type, "video/nsv")) {
+			gf_cache_set_mime_type(sess->cache_entry, "audio/aac");
+		}
+		sess->icy_bytes = 0;
+		sess->total_size = SIZE_IN_STREAM;
+		sess->status = GF_NETIO_DATA_EXCHANGE;
+	} else if (!ContentLength && !sess->chunked) {
+		if (sess->http_read_type == GET) {
 			sess->total_size = SIZE_IN_STREAM;
-			sess->status = GF_NETIO_DATA_EXCHANGE;
-		} else if (!ContentLength && !sess->chunked) {
-			if (sess->http_read_type == GET) {
-				sess->total_size = SIZE_IN_STREAM;
-				sess->use_cache_file = 0;
-				sess->status = GF_NETIO_DATA_EXCHANGE;
-				sess->bytes_done = 0;
-			} else {
-				gf_dm_sess_notify_state(sess, GF_NETIO_DATA_TRANSFERED, GF_OK);
-				gf_dm_disconnect(sess, 0);
-				return GF_OK;
-			}
-		} else {
-			sess->total_size = ContentLength;
-			if (sess->use_cache_file && sess->http_read_type == GET ) {
-				e = gf_cache_open_write_cache(sess->cache_entry, sess);
-				if (e) {
-					GF_LOG(GF_LOG_ERROR, GF_LOG_NETWORK, ( "[CACHE] Failed to open cache, error=%d\n", e));
-					goto exit;
-				}
-			}
+			sess->use_cache_file = 0;
 			sess->status = GF_NETIO_DATA_EXCHANGE;
 			sess->bytes_done = 0;
+		} else {
+			gf_dm_sess_notify_state(sess, GF_NETIO_DATA_TRANSFERED, GF_OK);
+			gf_dm_disconnect(sess, 0);
+			return GF_OK;
 		}
+	} else {
+		sess->total_size = ContentLength;
+		if (sess->use_cache_file && sess->http_read_type == GET ) {
+			e = gf_cache_open_write_cache(sess->cache_entry, sess);
+			if (e) {
+				GF_LOG(GF_LOG_ERROR, GF_LOG_NETWORK, ( "[CACHE] Failed to open cache, error=%d\n", e));
+				goto exit;
+			}
+		}
+		sess->status = GF_NETIO_DATA_EXCHANGE;
+		sess->bytes_done = 0;
 	}
+	
 
 	/* we may have existing data in this buffer ... */
 	if (!e && (BodyStart < (s32) bytesRead)) {
@@ -3460,5 +3482,19 @@ const char *gf_dm_sess_get_header(GF_DownloadSession *sess, const char *name)
 	}
 	return NULL;
 }
+
+GF_EXPORT
+GF_Err gf_dm_sess_get_header_sizes_and_times(GF_DownloadSession *sess, u32 *req_hdr_size, u32 *rsp_hdr_size, u32 *connect_time, u32 *reply_time, u32 *download_time)
+{
+	if (!sess) return GF_BAD_PARAM;
+
+	if (req_hdr_size) *req_hdr_size = sess->req_hdr_size;
+	if (rsp_hdr_size) *rsp_hdr_size = sess->rsp_hdr_size;
+	if (connect_time) *connect_time = sess->connect_time;
+	if (reply_time) *reply_time = sess->reply_time;
+	if (download_time) *download_time = sess->total_time_since_req;
+	return GF_OK;
+}
+
 
 #endif

@@ -346,13 +346,36 @@ GF_Err gf_isom_add_desc_to_root_od(GF_ISOFile *movie, GF_Descriptor *theDesc)
 GF_EXPORT
 GF_Err gf_isom_set_timescale(GF_ISOFile *movie, u32 timeScale)
 {
+	Double ts_scale;
+	GF_TrackBox *trak;
+	u32 i;
 	GF_Err e;
 	e = CanAccessMovie(movie, GF_ISOM_OPEN_WRITE);
 	if (e) return e;
 	gf_isom_insert_moov(movie);
 
+	if (movie->moov->mvhd->timeScale == timeScale) return GF_OK;
+
+	/*rewrite all durations and edit lists*/
+	ts_scale = timeScale;
+	ts_scale /= movie->moov->mvhd->timeScale;
+
 	movie->moov->mvhd->timeScale = timeScale;
 	movie->interleavingTime = timeScale;
+
+	movie->moov->mvhd->duration = (u64) (s64) ((s64) movie->moov->mvhd->duration * ts_scale);
+
+	i=0;
+	while ((trak = gf_list_enum(movie->moov->trackList, &i))) {
+		trak->Header->duration = (u64) (s64) ((s64) trak->Header->duration * ts_scale);
+		if (trak->editBox && trak->editBox->editList) {
+			u32 j, count = gf_list_count(trak->editBox->editList->entryList);
+			for (j=0; j<count; j++) {
+				GF_EdtsEntry *ent = (GF_EdtsEntry *)gf_list_get(trak->editBox->editList->entryList, j);
+				ent->segmentDuration = (u64) (s64) ((s64) ent->segmentDuration * ts_scale);
+			}
+		}
+	}
 	return GF_OK;
 }
 
@@ -2251,6 +2274,7 @@ found:
 }
 
 
+GF_EXPORT
 GF_Err gf_isom_reset_alt_brands(GF_ISOFile *movie)
 {
 	u32 *p;
@@ -2278,6 +2302,7 @@ GF_Err gf_isom_reset_alt_brands(GF_ISOFile *movie)
 	return GF_OK;
 }
 
+GF_EXPORT
 GF_Err gf_isom_set_sample_padding_bits(GF_ISOFile *movie, u32 trackNumber, u32 sampleNumber, u8 NbBits)
 {
 	GF_TrackBox *trak;
@@ -2294,6 +2319,7 @@ GF_Err gf_isom_set_sample_padding_bits(GF_ISOFile *movie, u32 trackNumber, u32 s
 }
 
 
+GF_EXPORT
 GF_Err gf_isom_remove_user_data_item(GF_ISOFile *movie, u32 trackNumber, u32 UserDataType, bin128 UUID, u32 UserDataIndex)
 {
 	GF_UserDataMap *map;
@@ -2347,6 +2373,7 @@ found:
 	return GF_OK;
 }
 
+GF_EXPORT
 GF_Err gf_isom_remove_user_data(GF_ISOFile *movie, u32 trackNumber, u32 UserDataType, bin128 UUID)
 {
 	GF_UserDataMap *map;
@@ -2389,6 +2416,7 @@ found:
 	return GF_OK;
 }
 
+GF_EXPORT
 GF_Err gf_isom_add_user_data(GF_ISOFile *movie, u32 trackNumber, u32 UserDataType, bin128 UUID, char *data, u32 DataLength)
 {
 	GF_UnknownBox *a;
@@ -2426,6 +2454,40 @@ GF_Err gf_isom_add_user_data(GF_ISOFile *movie, u32 trackNumber, u32 UserDataTyp
 		a->dataSize = DataLength;
 	}
 	return udta_AddBox(udta, (GF_Box *) a);
+}
+
+GF_EXPORT
+GF_Err gf_isom_add_user_data_boxes(GF_ISOFile *movie, u32 trackNumber, char *data, u32 DataLength)
+{
+	GF_Err e;
+	GF_TrackBox *trak;
+	GF_UserDataBox *udta;
+	GF_BitStream *bs;
+
+	e = CanAccessMovie(movie, GF_ISOM_OPEN_WRITE);
+	if (e) return e;
+
+	if (trackNumber) {
+		trak = gf_isom_get_track_from_file(movie, trackNumber);
+		if (!trak) return GF_BAD_PARAM;
+		if (!trak->udta) trak_AddBox((GF_Box*)trak, gf_isom_box_new(GF_ISOM_BOX_TYPE_UDTA));
+		udta = trak->udta;
+	} else {
+		if (!movie->moov->udta) moov_AddBox((GF_Box*)movie->moov, gf_isom_box_new(GF_ISOM_BOX_TYPE_UDTA));
+		udta = movie->moov->udta;
+	}
+	if (!udta) return GF_OUT_OF_MEM;
+
+	bs = gf_bs_new(data, DataLength, GF_BITSTREAM_READ);
+	while (gf_bs_available(bs)) {
+		GF_Box *a;
+		e = gf_isom_parse_box(&a, bs);
+		if (e) break;
+		e = udta_AddBox(udta, a);
+		if (e) break;
+	}
+	gf_bs_del(bs);
+	return e;
 }
 
 
@@ -4094,7 +4156,11 @@ GF_Err gf_isom_apple_set_tag(GF_ISOFile *mov, u32 tag, const char *data, u32 dat
 	if (!meta) return GF_BAD_PARAM;
 
 	ilst = gf_ismo_locate_box(meta->other_boxes, GF_ISOM_BOX_TYPE_ILST, NULL);
-	if (!ilst) return GF_NOT_SUPPORTED;
+	if (!ilst) {
+		ilst = (GF_ItemListBox *) gf_isom_box_new(GF_ISOM_BOX_TYPE_ILST);
+		if (!meta->other_boxes) meta->other_boxes = gf_list_new();
+		gf_list_add(meta->other_boxes, ilst);
+	}
 
 	if (tag==GF_ISOM_ITUNE_GENRE) {
 		btype = data ? GF_ISOM_BOX_TYPE_0xA9GEN : GF_ISOM_BOX_TYPE_GNRE;
@@ -4107,6 +4173,7 @@ GF_Err gf_isom_apple_set_tag(GF_ISOFile *mov, u32 tag, const char *data, u32 dat
 		if (info->type==btype) {
 			gf_list_rem(ilst->other_boxes, i-1);
 			gf_isom_box_del((GF_Box *) info);
+			info = NULL;
 			break;
 		}
 	}
@@ -4164,6 +4231,15 @@ GF_Err gf_isom_apple_set_tag(GF_ISOFile *mov, u32 tag, const char *data, u32 dat
 		info->data->flags = 0x15;
 		gf_bs_del(bs);
 	}
+
+	if (!info || (tag==GF_ISOM_ITUNE_ALL) ) {
+		if (!gf_list_count(ilst->other_boxes) || (tag==GF_ISOM_ITUNE_ALL) ) {
+			gf_list_del_item(meta->other_boxes, ilst);
+			gf_isom_box_del((GF_Box *) ilst);
+		}
+		return GF_OK;	
+	}
+
 	return gf_list_add(ilst->other_boxes, info);
 }
 
@@ -4966,7 +5042,7 @@ GF_Err gf_isom_copy_sample_info(GF_ISOFile *dst, u32 dst_track, GF_ISOFile *src,
 		e = stbl_GetSampleDepType(src_trak->Media->information->sampleTable->SampleDep, sampleNumber, &isLeading, &dependsOn, &dependedOn, &redundant);
 		if (e) return e;
 
-		e = stbl_AppendDependencyType(dst_trak->Media->information->sampleTable, dependsOn, dependedOn, redundant);
+		e = stbl_AppendDependencyType(dst_trak->Media->information->sampleTable, isLeading, dependsOn, dependedOn, redundant);
 		if (e) return e;
 	}
 
@@ -5016,6 +5092,42 @@ GF_Err gf_isom_copy_sample_info(GF_ISOFile *dst, u32 dst_track, GF_ISOFile *src,
 		}
 	}
 	return GF_OK;
+}
+
+GF_EXPORT
+GF_Err gf_isom_text_set_display_flags(GF_ISOFile *file, u32 track, u32 desc_index, u32 flags, GF_TextFlagsMode op_type)
+{
+	u32 i;
+	GF_Err e;
+	GF_TrackBox *trak;
+
+	e = CanAccessMovie(file, GF_ISOM_OPEN_WRITE);
+	if (e) return e;
+
+	trak = gf_isom_get_track_from_file(file, track);
+	if (!trak) return GF_BAD_PARAM;
+
+	for (i=0; i < gf_list_count(trak->Media->information->sampleTable->SampleDescription->other_boxes); i++) {
+		GF_Tx3gSampleEntryBox *txt;
+		if (desc_index && (i+1 != desc_index)) continue;
+
+		txt = gf_list_get(trak->Media->information->sampleTable->SampleDescription->other_boxes, i);
+		if (txt->type != GF_ISOM_BOX_TYPE_TX3G) continue;
+
+		switch (op_type) {
+		case GF_ISOM_TEXT_FLAGS_TOGGLE:
+			txt->displayFlags |= flags;
+			break;
+		case GF_ISOM_TEXT_FLAGS_UNTOGGLE:
+			txt->displayFlags &= ~flags;
+			break;
+		default:
+			txt->displayFlags = flags;
+			break;
+		}
+	}
+	return GF_OK;
+	
 }
 
 

@@ -459,12 +459,33 @@ GF_Err gf_import_mp3(GF_MediaImporter *import)
 	u32 nb_chan;
 	Bool force_mpeg4 = GF_FALSE;
 	FILE *in;
-	u32 hdr, size, max_size, track, di;
+	u32 hdr, size, max_size, track, di, id3_end = 0;
 	u64 done, tot_size, offset, duration;
 	GF_ISOSample *samp;
 
 	in = gf_f64_open(import->in_name, "rb");
 	if (!in) return gf_import_message(import, GF_URL_ERROR, "Opening file %s failed", import->in_name);
+
+
+	{
+		unsigned char id3v2[10];
+		u32 pos = (u32) fread(id3v2, sizeof(unsigned char), 10, in);
+		if (pos == 10) {
+			/* Did we read an ID3v2 ? */
+			if (id3v2[0] == 'I' && id3v2[1] == 'D' && id3v2[2] == '3') {
+				u32 sz = ((id3v2[9] & 0x7f) + ((id3v2[8] & 0x7f) << 7) + ((id3v2[7] & 0x7f) << 14) + ((id3v2[6] & 0x7f) << 21));
+
+				while (sz) {
+					u32 r = (u32) fread(id3v2, sizeof(unsigned char), 1, in);
+					if (r != 1) {
+						GF_LOG(GF_LOG_WARNING, GF_LOG_PARSER, ("[MP3 import] failed to read ID3\n"));
+					}
+					sz--;
+				}
+				id3_end = ftell(in); 
+			}
+		}
+	}
 
 	hdr = gf_mp3_get_next_header(in);
 	if (!hdr) {
@@ -538,7 +559,7 @@ GF_Err gf_import_mp3(GF_MediaImporter *import)
 
 	gf_f64_seek(in, 0, SEEK_END);
 	tot_size = gf_f64_tell(in);
-	gf_f64_seek(in, 0, SEEK_SET);
+	gf_f64_seek(in, id3_end, SEEK_SET);
 
 	e = GF_OK;
 	samp = gf_isom_sample_new();
@@ -2091,6 +2112,10 @@ GF_Err gf_import_isomedia(GF_MediaImporter *import)
 	}
 
 	gf_odf_desc_del((GF_Descriptor *) iod);
+	if ( ! gf_isom_get_track_count(import->dest)) {
+		u32 timescale = gf_isom_get_timescale(import->orig);
+		gf_isom_set_timescale(import->dest, timescale);
+	}
 
 	e = gf_isom_clone_track(import->orig, track_in, import->dest, (import->flags & GF_IMPORT_USE_DATAREF), &track);
 	if (e) goto exit;

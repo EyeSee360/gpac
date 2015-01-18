@@ -749,12 +749,21 @@ GF_Err gf_isom_get_rvc_config(GF_ISOFile *movie, u32 track, u32 sampleDescriptio
 	User Data Manipulation (cf write API too)
 */
 
+//returns the number of entries in UDTA of the track if trackNumber is not 0, or of the movie otherwise
+u32 gf_isom_get_udta_count(GF_ISOFile *movie, u32 trackNumber);
+
+//returns the type (box 4CC and UUID if any) of the given entry in UDTA of the track if trackNumber is not 0, or of the movie otherwise. udta_idx is 1-based index.
+GF_Err gf_isom_get_udta_type(GF_ISOFile *movie, u32 trackNumber, u32 udta_idx, u32 *UserDataType, bin128 *UUID);
+
 /* Gets the number of UserDataItems with the same ID / UUID in the desired track or
 in the movie if trackNumber is set to 0*/
 u32 gf_isom_get_user_data_count(GF_ISOFile *the_file, u32 trackNumber, u32 UserDataType, bin128 UUID);
 /* Gets the UserData for the specified item from the track or the movie if trackNumber is set to 0
 data is allocated by the function and is yours to free
-you musty pass (userData != NULL && *userData=NULL)*/
+you musty pass (userData != NULL && *userData=NULL)
+
+if UserDataIndex is 0, all boxes with type==UserDataType will be serialized (including box header and size) in the buffer
+*/
 GF_Err gf_isom_get_user_data(GF_ISOFile *the_file, u32 trackNumber, u32 UserDataType, bin128 UUID, u32 UserDataIndex, char **userData, u32 *userDataSize);
 
 
@@ -1032,6 +1041,9 @@ GF_Err gf_isom_remove_user_data_item(GF_ISOFile *the_file, u32 trackNumber, u32 
 GF_Err gf_isom_remove_uuid(GF_ISOFile *movie, u32 trackNumber, bin128 UUID);
 /*adds track, moov (trackNumber=0) or file-level (trackNumber=0xFFFFFFFF) UUID box of given type*/
 GF_Err gf_isom_add_uuid(GF_ISOFile *movie, u32 trackNumber, bin128 UUID, char *data, u32 data_size);
+
+/*Add a user data item in the desired track or in the movie if TrackNumber is 0, using a serialzed buffer of ISOBMFF boxes*/
+GF_Err gf_isom_add_user_data_boxes(GF_ISOFile *the_file, u32 trackNumber, char *data, u32 DataLength);
 
 /*
 		Update of the Writing API for IsoMedia Version 2
@@ -1816,6 +1828,14 @@ GF_Err gf_isom_update_webvtt_description(GF_ISOFile *movie, u32 trackNumber, u32
 
 GF_Err gf_isom_stxt_info_get(GF_ISOFile *the_file, u32 trackNumber, u32 StreamDescriptionIndex, char **mime, char **config);
 
+typedef enum
+{
+	GF_ISOM_TEXT_FLAGS_OVERWRITE = 0,
+	GF_ISOM_TEXT_FLAGS_TOGGLE,
+	GF_ISOM_TEXT_FLAGS_UNTOGGLE,
+} GF_TextFlagsMode;
+//sets text display flags according to given mode. If SampleDescriptionIndex is 0, sets the flags for all text descriptions.
+GF_Err gf_isom_text_set_display_flags(GF_ISOFile *file, u32 track, u32 SampleDescriptionIndex, u32 flags, GF_TextFlagsMode op_type);
 
 #ifndef GPAC_DISABLE_ISOM_WRITE
 
@@ -2172,8 +2192,10 @@ GF_Err gf_isom_timed_meta_data_config_new(GF_ISOFile *movie, u32 trackNumber, Bo
 ********************************************************************/
 enum
 {
-	/*probe is only used ti check if iTunes info are present*/
+	/*probe is only used to check if iTunes info are present*/
 	GF_ISOM_ITUNE_PROBE = 0,
+	/*probe is only used to remove all tags*/
+	GF_ISOM_ITUNE_ALL = 1,
 	GF_ISOM_ITUNE_ALBUM	= GF_4CC( 0xA9, 'a', 'l', 'b' ),
 	GF_ISOM_ITUNE_ARTIST = GF_4CC( 0xA9, 'A', 'R', 'T' ),
 	GF_ISOM_ITUNE_COMMENT = GF_4CC( 0xA9, 'c', 'm', 't' ),

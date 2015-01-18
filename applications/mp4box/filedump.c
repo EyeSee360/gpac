@@ -757,8 +757,9 @@ void dump_isom_xml(GF_ISOFile *file, char *inName)
 
 void dump_file_rtp(GF_ISOFile *file, char *inName)
 {
-	u32 i, j;
+	u32 i, j, size;
 	FILE *dump;
+	const char *sdp;
 	char szBuf[1024];
 
 	if (inName) {
@@ -777,6 +778,9 @@ void dump_file_rtp(GF_ISOFile *file, char *inName)
 		if (gf_isom_get_media_type(file, i+1) != GF_ISOM_MEDIA_HINT) continue;
 
 		fprintf(dump, "<RTPHintTrack trackID=\"%d\">\n", gf_isom_get_track_id(file, i+1));
+		gf_isom_sdp_track_get(file, i+1, &sdp, &size);
+		fprintf(dump, "<SDPInfo>%s</SDPInfo>", sdp);
+
 		for (j=0; j<gf_isom_get_sample_count(file, i+1); j++) {
 			gf_isom_dump_hint_sample(file, i+1, j+1, dump);
 		}
@@ -1451,7 +1455,63 @@ static char *format_date(u64 time, char *szTime)
 	return szTime;
 }
 
+void print_udta(GF_ISOFile *file, u32 track_number)
+{
+	u32 i, count;
 
+	count =  gf_isom_get_udta_count(file, track_number);
+	if (!count) return;
+
+	fprintf(stderr, "%d UDTA types: ", count);
+
+	for (i=0; i<count; i++) {
+		u32 type;
+		bin128 uuid;
+		gf_isom_get_udta_type(file, track_number, i+1, &type, &uuid);
+		fprintf(stderr, "%s (%d) ", gf_4cc_to_str(type), gf_isom_get_user_data_count(file, track_number, type, uuid) );
+	}
+	fprintf(stderr, "\n");
+}
+
+GF_Err dump_udta(GF_ISOFile *file, char *inName, u32 dump_udta_type, u32 dump_udta_track)
+{
+	char szName[1024], *data;
+	FILE *t;
+	bin128 uuid;
+	u32 count, res;
+	GF_Err e;
+
+	memset(uuid, 0, 16);
+	count = gf_isom_get_user_data_count(file, dump_udta_track, dump_udta_type, uuid);
+	if (!count) {
+		fprintf(stderr, "No UDTA for type %s found\n", gf_4cc_to_str(dump_udta_type) );
+		return GF_OK;
+	}
+
+	data = NULL;
+	count = 0;
+	e = gf_isom_get_user_data(file, dump_udta_track, dump_udta_type, uuid, 0, &data, &count);
+	if (e) {
+		fprintf(stderr, "Error dumping UDTA %s: %s\n", gf_4cc_to_str(dump_udta_type), gf_error_to_string(e) );
+		return e;
+	} 
+	sprintf(szName, "%s_%s.udta", inName, gf_4cc_to_str(dump_udta_type) );
+	t = fopen(szName, "wb");
+	if (!t) {
+		gf_free(data);
+		fprintf(stderr, "Cannot open file %s\n", szName );
+		return GF_IO_ERR;
+	}
+	res = (u32) fwrite(data, 1, count, t);
+	fclose(t);
+	gf_free(data);
+	if (count != res) {
+		fprintf(stderr, "Error writing udta to file\n");
+		gf_free(data);
+		return GF_IO_ERR;
+	}
+	return GF_OK;
+}
 
 
 GF_Err dump_chapters(GF_ISOFile *file, char *inName, Bool dump_ogg)
@@ -1638,6 +1698,8 @@ void DumpTrackInfo(GF_ISOFile *file, u32 trackID, Bool full_dump)
 		gf_isom_get_handler_name(file, trackNum, &handler_name);
 		fprintf(stderr, "Handler name: %s\n", handler_name);
 	}
+
+	print_udta(file, trackNum);
 
 	if (mtype==GF_ISOM_MEDIA_VISUAL) {
 		s32 tx, ty;
@@ -2400,6 +2462,7 @@ void DumpMovieInfo(GF_ISOFile *file)
 		}
 	}
 
+	print_udta(file, 0);
 	fprintf(stderr, "\n");
 	for (i=0; i<gf_isom_get_track_count(file); i++) {
 		DumpTrackInfo(file, gf_isom_get_track_id(file, i+1), 0);

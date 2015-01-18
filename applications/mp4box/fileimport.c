@@ -27,13 +27,14 @@
 #include <gpac/tools.h>
 #include <gpac/media_tools.h>
 #include <gpac/constants.h>
+#include <gpac/scene_manager.h>
+#include <gpac/network.h>
+#include <gpac/base_coding.h>
 
 #if !defined(GPAC_DISABLE_VRML) && !defined(GPAC_DISABLE_X3D) && !defined(GPAC_DISABLE_SVG)
 #include <gpac/scenegraph.h>
 #endif
-#ifndef GPAC_DISABLE_SMGR
-#include <gpac/scene_manager.h>
-#endif
+
 
 #ifndef GPAC_DISABLE_BIFS
 #include <gpac/bifs.h>
@@ -41,7 +42,6 @@
 #ifndef GPAC_DISABLE_VRML
 #include <gpac/nodes_mpeg4.h>
 #endif
-#include <gpac/network.h>
 
 #ifndef GPAC_DISABLE_ISOM_WRITE
 
@@ -194,9 +194,53 @@ static void set_chapter_track(GF_ISOFile *file, u32 track, u32 chapter_ref_trak)
 	}
 }
 
+GF_Err set_file_udta(GF_ISOFile *dest, u32 tracknum, u32 udta_type, char *src, Bool is_box_array)
+{
+	char *data = NULL;
+	u32 size;
+	bin128 uuid;
+	memset(uuid, 0 , 16);
+
+	if (!udta_type && !is_box_array) return GF_BAD_PARAM;
+
+	if (!src) {
+		return gf_isom_remove_user_data(dest, tracknum, udta_type, uuid);
+	}
+
+	if (!strnicmp(src, "base64", 6)) {
+		src += 7;
+		size = (u32) strlen(src);
+		data = gf_malloc(sizeof(char) * size);
+		size = gf_base64_decode(src, size, data, size);
+	} else {
+		FILE *t = fopen(src, "rb");
+		if (!t) return GF_IO_ERR;
+		fseek(t, 0, SEEK_END);
+		size = ftell(t);
+		fseek(t, 0, SEEK_SET);
+		data = gf_malloc(sizeof(char)*size);
+		if (size != fread(data, 1, size, t) ) {
+			gf_free(data);
+			fclose(t);
+			return GF_IO_ERR;
+		}
+		fclose(t);
+	}
+
+	if (size && data) {
+		if (is_box_array) {
+			gf_isom_add_user_data_boxes(dest, tracknum, data, size);
+		} else {
+			gf_isom_add_user_data(dest, tracknum, udta_type, uuid, data, size);
+		}
+		gf_free(data);
+	}
+	return GF_OK;
+}
+
 GF_Err import_file(GF_ISOFile *dest, char *inName, u32 import_flags, Double force_fps, u32 frames_per_sample)
 {
-	u32 track_id, i, j, timescale, track, stype, profile, level, new_timescale, rescale, svc_mode, tile_mode;
+	u32 track_id, i, j, timescale, track, stype, profile, level, new_timescale, rescale, svc_mode, tile_mode, txt_flags;
 	s32 par_d, par_n, prog_id, delay;
 	s32 tw, th, tx, ty, txtw, txth, txtx, txty;
 	Bool do_audio, do_video, do_all, disable, track_layout, text_layout, chap_ref, is_chap, is_chap_file, keep_handler, negative_cts_offset, rap_only;
@@ -206,6 +250,7 @@ GF_Err import_file(GF_ISOFile *dest, char *inName, u32 import_flags, Double forc
 	GF_MediaImporter import;
 	char *ext, szName[1000], *handler_name, *rvc_config, *chapter_name;
 	GF_List *kinds;
+	GF_TextFlagsMode txt_mode = GF_ISOM_TEXT_FLAGS_OVERWRITE;
 
 	rvc_predefined = 0;
 	chapter_name = NULL;
@@ -237,6 +282,7 @@ GF_Err import_file(GF_ISOFile *dest, char *inName, u32 import_flags, Double forc
 	negative_cts_offset = 0;
 	tile_mode = 0;
 	rap_only = 0;
+	txt_flags = 0;
 
 	tw = th = tx = ty = txtw = txth = txtx = txty = 0;
 	par_d = par_n = -2;
@@ -402,6 +448,19 @@ GF_Err import_file(GF_ISOFile *dest, char *inName, u32 import_flags, Double forc
 			}
 			gf_list_add(kinds, kind_scheme);
 			gf_list_add(kinds, kind_value);
+		}
+		else if (!strnicmp(ext+1, "txtflags", 8)) {
+			if (!strnicmp(ext+1, "txtflags=", 9)) {
+				sscanf(ext+10, "%x", &txt_flags);
+			}
+			else if (!strnicmp(ext+1, "txtflags+=", 10)) {
+				sscanf(ext+11, "%x", &txt_flags);
+				txt_mode = GF_ISOM_TEXT_FLAGS_TOGGLE;
+			}
+			else if (!strnicmp(ext+1, "txtflags-=", 10)) {
+				sscanf(ext+11, "%x", &txt_flags);
+				txt_mode = GF_ISOM_TEXT_FLAGS_UNTOGGLE;
+			}
 		}
 
 		/*EXPERIMENTAL OPTIONS NOT DOCUMENTED*/
@@ -593,6 +652,11 @@ GF_Err import_file(GF_ISOFile *dest, char *inName, u32 import_flags, Double forc
 			if (gf_isom_get_hevc_shvc_type(import.dest, i+1, 1)>=GF_ISOM_HEVCTYPE_HEVC_SHVC)
 				check_track_for_shvc = i+1;
 
+			if (txt_flags) {
+				gf_isom_text_set_display_flags(import.dest, i+1, 0, txt_flags, txt_mode);
+			}
+
+
 			if (tile_mode) {
 				switch (gf_isom_get_media_subtype(import.dest, i+1, 1)) {
 				case GF_ISOM_SUBTYPE_HVC1:
@@ -740,6 +804,10 @@ GF_Err import_file(GF_ISOFile *dest, char *inName, u32 import_flags, Double forc
 
 			if (gf_isom_get_hevc_shvc_type(import.dest, track, 1)>=GF_ISOM_HEVCTYPE_HEVC_SHVC)
 				check_track_for_shvc = track;
+
+			if (txt_flags) {
+				gf_isom_text_set_display_flags(import.dest, track, 0, txt_flags, txt_mode);
+			}
 
 			if (tile_mode) {
 				switch (gf_isom_get_media_subtype(import.dest, track, 1)) {
@@ -2175,6 +2243,7 @@ GF_Err EncodeFile(char *in, GF_ISOFile *mp4, GF_SMEncodeOptions *opts, FILE *log
 			gf_log_set_tool_level(GF_LOG_CODING, GF_LOG_DEBUG);
 			prev_logs = gf_log_set_callback(logs, scene_coding_log);
 		}
+		opts->src_url = in;
 		e = gf_sm_encode_to_file(ctx, mp4, opts);
 		if (logs) {
 			gf_log_set_tool_level(GF_LOG_CODING, GF_LOG_ERROR);

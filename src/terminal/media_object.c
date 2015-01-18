@@ -365,10 +365,10 @@ void gf_mo_update_caps(GF_MediaObject *mo)
 
 
 GF_EXPORT
-char *gf_mo_fetch_data(GF_MediaObject *mo, Bool resync, Bool *eos, u32 *timestamp, u32 *size, s32 *ms_until_pres, s32 *ms_until_next)
+char *gf_mo_fetch_data(GF_MediaObject *mo, GF_MOFetchMode resync, Bool *eos, u32 *timestamp, u32 *size, s32 *ms_until_pres, s32 *ms_until_next)
 {
 	GF_Codec *codec;
-	Bool force_decode = GF_FALSE;
+	u32 force_decode_mode = 0;
 	u32 obj_time;
 	GF_CMUnit *CU;
 	s32 diff;
@@ -405,6 +405,8 @@ char *gf_mo_fetch_data(GF_MediaObject *mo, Bool resync, Bool *eos, u32 *timestam
 		gf_odm_lock(mo->odm, 0);
 		return NULL;
 	}
+	if (resync==GF_MO_FETCH_PAUSED)
+		resync=GF_MO_FETCH;
 
 	bench_mode = mo->odm->term->bench_mode;
 
@@ -415,28 +417,37 @@ char *gf_mo_fetch_data(GF_MediaObject *mo, Bool resync, Bool *eos, u32 *timestam
 			GF_LOG(GF_LOG_INFO, GF_LOG_CODEC, ("[%s] ODM%d: Resizing output buffer %d -> %d\n", codec->decio->module_name, codec->odm->OD->objectDescriptorID, codec->CB->UnitSize, codec->force_cb_resize));
 			gf_codec_resize_composition_buffer(codec, codec->force_cb_resize);
 			codec->force_cb_resize=0;
-			force_decode = GF_TRUE;
+            //decode and resize CB
+			force_decode_mode = 1;
 		}
 	}
 
-	/*fast forward, bench mode with composition memory: force decode if no data is available*/
-	if (! *eos && ((codec->ck->speed > FIX_ONE) || (codec->odm->term->bench_mode && !codec->CB->no_allocation) || (codec->type==GF_STREAM_AUDIO) ) )
-		force_decode = GF_TRUE;
+	/*fast forward, bench mode with composition memory: force one decode if no data is available*/
+    if (! *eos && ((codec->ck->speed > FIX_ONE) || (codec->odm->term->bench_mode && !codec->CB->no_allocation) || (codec->type==GF_STREAM_AUDIO) ) ) {
+        force_decode_mode = 2;
+    }
 
-	if (force_decode) {
-		u32 retry=100;
+	if (force_decode_mode) {
+		u32 retry = 100;
 		gf_odm_lock(mo->odm, 0);
 		while (retry) {
 			if (gf_term_lock_codec(codec, GF_TRUE, GF_TRUE)) {
 				gf_codec_process(codec, 1);
 				gf_term_lock_codec(codec, GF_FALSE, GF_TRUE);
-				break;
 			}
+            if (force_decode_mode==2)
+                break;
+
+			CU = gf_cm_get_output(codec->CB);
+			if (CU)
+				break;
+
 			retry--;
-			gf_sleep(0);
+			//we will wait max 100 ms for the CB to be re-fill
+			gf_sleep(1);
 		}
-		if (!retry && codec->force_cb_resize) {
-			GF_LOG(GF_LOG_WARNING, GF_LOG_MEDIA, ("[ODM%d] At %d could not resize and decode next frame in one pass - blank frame after TS %d\n", mo->odm->OD->objectDescriptorID, gf_clock_time(codec->ck), mo->timestamp));
+		if (!retry) {
+			GF_LOG(GF_LOG_WARNING, GF_LOG_MEDIA, ("[ODM%d] At %d could not resize, decode and fetch next frame in 100 ms - blank frame after TS %d\n", mo->odm->OD->objectDescriptorID, gf_clock_time(codec->ck), mo->timestamp));
 		}
 		if (!gf_odm_lock_mo(mo))
 			return NULL;
@@ -453,10 +464,10 @@ char *gf_mo_fetch_data(GF_MediaObject *mo, Bool resync, Bool *eos, u32 *timestam
 	/*note this assert is NOT true when recomputing DTS from CTS on the fly (MPEG1/2 RTP and H264/AVC RTP)*/
 	//assert(CU->TS >= codec->CB->LastRenderedTS);
 
-	if (codec->CB->UnitCount<=1) resync = GF_FALSE;
+	if (codec->CB->UnitCount<=1) resync = GF_MO_FETCH;
 
 	if (bench_mode && resync) {
-		resync = GF_FALSE;
+		resync = GF_MO_FETCH;
 		if (mo->timestamp == CU->TS) {
 			if (CU->next->dataLength) {
 				gf_cm_drop_output(codec->CB);
@@ -470,8 +481,8 @@ char *gf_mo_fetch_data(GF_MediaObject *mo, Bool resync, Bool *eos, u32 *timestam
 	obj_time = gf_clock_time(codec->ck);
 
 	//no drop mode, only for speed = 1: all frames are presented, we discard the current output only if already presented and next frame time is mature
-	if ((codec->ck->speed==1) && !(mo->odm->term->flags & GF_TERM_DROP_LATE_FRAMES) && (mo->type==GF_MEDIA_OBJECT_VIDEO)) {
-		resync=GF_FALSE;
+	if (!codec->ck->Paused && (codec->ck->speed==1) && !(mo->odm->term->flags & GF_TERM_DROP_LATE_FRAMES) && (mo->type==GF_MEDIA_OBJECT_VIDEO)) {
+		resync=GF_MO_FETCH;
 		if (/*gf_clock_is_started(mo->odm->codec->ck) && */ (mo->timestamp==CU->TS) && CU->next->dataLength && (CU->next->TS <= obj_time) ) {
 			gf_cm_drop_output(codec->CB);
 			CU = gf_cm_get_output(codec->CB);
@@ -489,7 +500,7 @@ char *gf_mo_fetch_data(GF_MediaObject *mo, Bool resync, Bool *eos, u32 *timestam
 				break;
 
 			if (!CU->next->dataLength) {
-				if (force_decode) {
+				if (force_decode_mode) {
 					obj_time = gf_clock_time(codec->ck);
 					gf_odm_lock(mo->odm, 0);
 					if (gf_term_lock_codec(codec, GF_TRUE, GF_TRUE)) {
@@ -557,6 +568,9 @@ char *gf_mo_fetch_data(GF_MediaObject *mo, Bool resync, Bool *eos, u32 *timestam
 		*eos = GF_FALSE;
 
 		GF_LOG(GF_LOG_DEBUG, GF_LOG_MEDIA, ("[ODM%d (%s)] At OTB %u fetch frame TS %u size %d (previous TS %d) - %d unit in CB - UTC "LLU" ms - %d ms until CTS is due - %d ms until next frame\n", mo->odm->OD->objectDescriptorID, mo->odm->net_service->url, gf_clock_time(codec->ck), CU->TS, mo->framesize, mo->timestamp, codec->CB->UnitCount, gf_net_get_utc(), mo->ms_until_pres, mo->ms_until_next ));
+	} else if (*eos) {
+		//already rendered the last frame, consider we no longer have pending late frame on this stream
+		mo->ms_until_pres = 0;
 	}
 
 	/*also adjust CU time based on consummed bytes in input, since some codecs output very large audio chunks*/

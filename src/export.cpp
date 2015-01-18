@@ -360,6 +360,7 @@
 #pragma comment (linker, EXPORT_SYMBOL(gf_dm_sess_reset) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_dm_sess_mime_type) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_dm_sess_get_header) )
+#pragma comment (linker, EXPORT_SYMBOL(gf_dm_sess_get_header_sizes_and_times) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_dm_new) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_dm_del) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_dm_set_data_rate) )
@@ -888,11 +889,13 @@
 #pragma comment (linker, EXPORT_SYMBOL(gf_isom_set_media_language) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_isom_set_handler_name) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_isom_add_user_data) )
+#pragma comment (linker, EXPORT_SYMBOL(gf_isom_add_user_data_boxes) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_isom_remove_user_data) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_isom_remove_user_data_item) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_isom_use_compact_size) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_isom_set_brand_info) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_isom_modify_alternate_brand) )
+#pragma comment (linker, EXPORT_SYMBOL(gf_isom_reset_alt_brands) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_isom_set_sample_padding_bits) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_isom_set_visual_info) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_isom_set_pixel_aspect_ratio) )
@@ -953,6 +956,7 @@
 #pragma comment (linker, EXPORT_SYMBOL(gf_isom_text_add_blink) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_isom_text_set_wrap) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_isom_text_to_sample) )
+#pragma comment (linker, EXPORT_SYMBOL(gf_isom_text_set_display_flags) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_isom_remove_track_protection) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_isom_set_ismacryp_protection) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_isom_change_ismacryp_protection) )
@@ -1476,6 +1480,7 @@
 #pragma comment (linker, EXPORT_SYMBOL(gf_bifs_encoder_get_config) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_bifs_encoder_get_version) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_bifs_encoder_get_rap) )
+#pragma comment (linker, EXPORT_SYMBOL(gf_bifs_encoder_set_source_url) )
 #endif
 #endif /*GPAC_DISABLE_BIFS*/
 
@@ -1729,6 +1734,7 @@
 #pragma comment (linker, EXPORT_SYMBOL(gf_term_get_simulation_frame_rate) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_term_step_clocks) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_term_process_flush) )
+#pragma comment (linker, EXPORT_SYMBOL(gf_term_process_flush_video) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_service_get_interface) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_term_get_service_info) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_term_get_text_selection) )
@@ -1816,6 +1822,7 @@
 #pragma comment (linker, EXPORT_SYMBOL(gf_sc_remove_audio_listener) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_sc_focus_switch_ring) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_sc_is_over) )
+#pragma comment (linker, EXPORT_SYMBOL(gf_sc_flush_next_audio) )
 
 #ifndef GPAC_DISABLE_SVG
 #pragma comment (linker, EXPORT_SYMBOL(gf_sc_animation_get_scenegraph) )
@@ -1967,6 +1974,8 @@
 #pragma comment (linker, EXPORT_SYMBOL(gf_dash_get_url) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_dash_is_m3u8) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_dash_get_group_count) )
+#pragma comment (linker, EXPORT_SYMBOL(gf_isom_get_udta_count) )
+#pragma comment (linker, EXPORT_SYMBOL(gf_isom_get_udta_type) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_dash_get_group_udta) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_dash_set_group_udta) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_dash_is_group_selected) )

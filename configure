@@ -102,6 +102,7 @@ has_openjpeg="no"
 gprof_build="no"
 static_build="no"
 want_pic="no"
+want_gcov="no"
 has_joystick="no"
 has_xul="no"
 enable_joystick="no"
@@ -220,6 +221,7 @@ GPAC configuration options:
 
   --enable-debug           produce debug version
   --enable-gprof           enable profiling
+  --enable-gcov            enable coverage
   --enable-pic             enable Position Independant Code for shared objects
   --strip                  enable strip
   --std-allocator          uses standard lib memory allocator
@@ -351,6 +353,8 @@ for opt do
         --disable-opt) no_gcc_opt="yes"
             ;;
         --enable-pic) want_pic="yes";
+            ;;
+        --enable-gcov) want_gcov="yes";
             ;;
         --verbose) verbose="yes";
             ;;
@@ -662,6 +666,11 @@ if test "$want_pic"  = "yes" ; then
     CXXFLAGS="$CXXFLAGS -fPIC -DPIC"
 fi
 
+if test "$want_gcov"  = "yes" ; then
+    CFLAGS="$CFLAGS --coverage"
+    CXXFLAGS="$CXXFLAGS --coverage"
+    LDFLAGS="$LDFLAGS --coverage"
+fi
 
 #force use of cflags with cc
 cc_naked=$cc
@@ -1736,7 +1745,7 @@ for opt do
             ;;
         --enable-sdl-static=*) sdl_static="yes"
             ;;
-        --enable-jack=*) has_jack="yes"
+        --enable-jack) has_jack="yes"
             ;;
         --X11-path=*) X11_PATH=`echo $opt | cut -d '=' -f 2`
             ;;
@@ -1748,7 +1757,7 @@ for opt do
             ;;
         --enable-amr-nb-fixed) has_amr_nb_fixed="yes"
             ;;
-        --disable-pulseaudio=*) has_pulseaudio="no"
+        --disable-pulseaudio) has_pulseaudio="no"
             ;;
         --enable-amr-nb) has_amr_nb="yes"
             ;;
@@ -1758,7 +1767,7 @@ for opt do
             ;;
         --disable-oggvorbis) has_oggvorbis="no"
             ;;
-        --disable-jack=*) has_jack="no"
+        --disable-jack) has_jack="no"
             ;;
         --disable-alsa) has_alsa="no"
             ;;
@@ -1859,7 +1868,7 @@ for opt do
             ;;
         --enable-joystick) enable_joystick="yes"
             ;;
-        --enable-pulseaudio=*) has_pulseaudio="yes"
+        --enable-pulseaudio) has_pulseaudio="yes"
             ;;
         --disable-all) has_pulseaudio="no"; has_alsa="no"; disable_core_tools="yes"; disable_3d="yes"; disable_svg="yes"; disable_vrml="yes"; disable_od="yes"; disable_bifs="yes"; disable_bifs_enc="yes"; disable_laser="yes"; disable_seng="yes"; disable_qtvr="yes";  disable_avi="yes"; disable_ogg="yes"; disable_m2ps="yes"; disable_m2ts="yes"; disable_m2ts_mux="yes"; disable_parsers="yes"; disable_import="yes"; disable_export="yes"; disable_swf="yes"; disable_scene_stats="yes"; disable_scene_dump="yes"; disable_scene_encode="yes"; disable_loader_isoff="yes"; disable_od_dump="yes"; disable_od_parse="yes"; disable_isom_dump="yes"; disable_mcrypt="yes"; disable_isoff="yes"; disable_isoff_write="yes"; disable_isoff_hint="yes"; disable_isoff_frag="yes"; disable_streaming="yes"; disable_x3d="yes"; disable_loader_bt="yes"; disable_loader_xmt="yes"; has_dvb4linux="no"; disable_player="yes"; disable_vobsub="yes"; disable_scenegraph="yes"; disable_dvbx="yes"; disable_ttxt="yes"; disable_ttml="yes"; disable_saf="yes"; disable_smgr="yes"; disable_mpd="yes"; disable_dash="yes"; disable_isoff_hds="yes"; disable_hevc="yes"
             ;;
@@ -2331,6 +2340,22 @@ if test "$static_mp4box" = "yes"; then
     has_js="no"
     has_jpeg="no"
     has_png="no"
+    has_mad="no"
+    has_ft="no"
+    has_openjpeg="no"
+    has_mad="no"
+    has_faad="no"
+    has_xvid="no"
+    has_ffmpeg="no"
+    has_ogg="no"
+    has_theora="no"
+    has_vorbis="no"
+    has_a52="no"
+    has_opensvc="no"
+    has_openhevc="no"
+    has_freenect="no"
+    has_platinum="no"
+    disable_player="yes"
 fi
 
 if test "$cpu" = "sh4"; then
@@ -2975,6 +3000,7 @@ echo "DISABLE_DVBX=$disable_dvbx" >> config.mak
 echo "DISABLE_AVILIB=$disable_avi" >> config.mak
 echo "DISABLE_M2PS=$disable_m2ps" >> config.mak
 echo "DISABLE_OGG=$disable_ogg" >> config.mak
+echo "DISABLE_ISOFF=$disable_isoff" >> config.mak
 echo "DISABLE_ISOFF_HINT=$disable_isoff_hint" >> config.mak
 echo "DISABLE_VOBSUB=$disable_vobsub" >> config.mak
 echo "DISABLE_TTXT=$disable_ttxt" >> config.mak
@@ -3000,12 +3026,6 @@ echo "DISABLE_M2TS=$disable_m2ts" >> config.mak
 
 echo "GPAC_USE_TINYGL=$has_tinygl" >> config.mak
 echo "OGL_INCLS=$INCL3D" >> config.mak
-
-if test "$disable_isoff" = "yes" -o "$disable_isoff_write" = "yes" ; then
-	echo "DISABLE_ISOFF=yes" >> config.mak
-else
-        echo "DISABLE_ISOFF=no" >> config.mak
-fi
 
 echo "HAS_OPENGL=$has_opengl" >> config.mak
 

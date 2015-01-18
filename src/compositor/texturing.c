@@ -203,7 +203,7 @@ void gf_sc_texture_update_frame(GF_TextureHandler *txh, Bool disable_resync)
 			gf_sc_texture_release(txh);
 		}
 	}
-	txh->data = gf_mo_fetch_data(txh->stream, !disable_resync, &txh->stream_finished, &ts, &size, &ms_until_pres, &ms_until_next);
+	txh->data = gf_mo_fetch_data(txh->stream, disable_resync ? GF_MO_FETCH : GF_MO_FETCH_RESYNC, &txh->stream_finished, &ts, &size, &ms_until_pres, &ms_until_next);
 
 	if (!(gf_mo_get_flags(txh->stream) & GF_MO_IS_INIT)) {
 		needs_reload = 1;
@@ -235,6 +235,9 @@ void gf_sc_texture_update_frame(GF_TextureHandler *txh, Bool disable_resync)
 		return;
 	}
 
+	if (txh->compositor->frame_delay > ms_until_pres)
+		txh->compositor->frame_delay = ms_until_pres;
+
 	/*if setup and same frame return*/
 	if (txh->tx_io && (txh->stream_finished || (txh->last_frame_time==ts)) ) {
 		gf_mo_release_data(txh->stream, 0xFFFFFFFF, 0);
@@ -259,9 +262,6 @@ void gf_sc_texture_update_frame(GF_TextureHandler *txh, Bool disable_resync)
 		if (push_delay > ms_until_pres) ms_until_pres = 0;
 		else ms_until_pres -= push_delay;
 	}
-
-	if (txh->compositor->frame_delay < ms_until_pres)
-		txh->compositor->frame_delay = ms_until_pres;
 
 	txh->compositor->next_frame_delay = 1;
 

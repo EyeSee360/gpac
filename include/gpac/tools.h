@@ -685,6 +685,7 @@ void gf_sys_init(Bool enable_memory_tracker);
  *	\note This can be called several times but the system will be closed when no more users are counted.
  */
 void gf_sys_close();
+
 /*!
  *	\brief System arguments
  *

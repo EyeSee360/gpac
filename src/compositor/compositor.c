@@ -212,15 +212,19 @@ static void gf_sc_reconfig_task(GF_Compositor *compositor)
 }
 
 GF_EXPORT
-Bool gf_sc_draw_frame(GF_Compositor *compositor, u32 *ms_till_next)
+Bool gf_sc_draw_frame(GF_Compositor *compositor, Bool no_flush, u32 *ms_till_next)
 {
+	if (no_flush)
+		compositor->skip_flush=1;
 	gf_sc_simulation_tick(compositor);
+
 	if (ms_till_next) {
 		if ((s32) compositor->next_frame_delay == -1)
 			*ms_till_next = compositor->frame_duration;
 		else
 			*ms_till_next = MIN(compositor->next_frame_delay, compositor->frame_duration);
 	}
+	if (compositor->frame_delay<0) return 1;
 	if (compositor->frame_draw_type) return 1;
 	if (compositor->fonts_pending) return 1;
 	return GF_FALSE;
@@ -551,10 +555,13 @@ GF_Compositor *gf_sc_new(GF_User *user, Bool self_threaded, GF_Terminal *term)
 	if ((tmp->user->init_flags & GF_TERM_NO_REGULATION) || !tmp->VisualThread)
 		tmp->no_regulation = GF_TRUE;
 
-	/*set default size if owning output*/
+#if 1
+    /*set default size if owning output*/
 	if (!tmp->user->os_window_handler) {
 		gf_sc_set_size(tmp, SC_DEF_WIDTH, SC_DEF_HEIGHT);
 	}
+#endif
+    
 	/*try to load GL extensions*/
 #ifndef GPAC_DISABLE_3D
 	gf_sc_load_opengl_extensions(tmp, GF_FALSE);
@@ -698,6 +705,7 @@ static void gf_sc_set_play_state(GF_Compositor *compositor, u32 PlayState)
 	/*step mode*/
 	if (PlayState==GF_STATE_STEP_PAUSE) {
 		compositor->step_mode = 1;
+		compositor->audio_renderer->step_mode = 1;
 		if (!compositor->paused)
 			gf_term_set_option(compositor->term, GF_OPT_PLAY_STATE, GF_STATE_PAUSED);
 		else {
@@ -2173,6 +2181,18 @@ static void compositor_release_textures(GF_Compositor *compositor, Bool frame_dr
 	}
 }
 
+void gf_sc_flush_video(GF_Compositor *compositor)
+{
+	GF_Window rc;
+
+	//release compositor in case we have vsync
+	gf_sc_lock(compositor, 0);
+	rc.x = rc.y = 0;
+	rc.w = compositor->display_width;
+	rc.h = compositor->display_height;
+	compositor->video_out->Flush(compositor->video_out, &rc);
+	gf_sc_lock(compositor, 1);
+}
 
 void gf_sc_simulation_tick(GF_Compositor *compositor)
 {
@@ -2219,6 +2239,7 @@ void gf_sc_simulation_tick(GF_Compositor *compositor)
 			gf_sleep(compositor->bench_mode ? 2 : compositor->frame_duration);
 		}
 		compositor->force_bench_frame=0;
+		compositor->frame_draw_type = 0;
 		return;
 	}
 
@@ -2271,7 +2292,7 @@ void gf_sc_simulation_tick(GF_Compositor *compositor)
 
 
 	//first update all natural textures to figure out timing
-	compositor->frame_delay = (u32) -1;
+	compositor->frame_delay = 0;
 	compositor->next_frame_delay = (u32) -1;
 	frame_duration = compositor->frame_duration;
 
@@ -2450,7 +2471,6 @@ void gf_sc_simulation_tick(GF_Compositor *compositor)
 
 	/*if invalidated, draw*/
 	if (compositor->frame_draw_type) {
-		GF_Window rc;
 		Bool textures_released = 0;
 
 #ifndef GPAC_DISABLE_LOG
@@ -2497,14 +2517,7 @@ void gf_sc_simulation_tick(GF_Compositor *compositor)
 		}
 
 		if (compositor->skip_flush!=1) {
-
-			//release compositor in case we have vsync
-			gf_sc_lock(compositor, 0);
-			rc.x = rc.y = 0;
-			rc.w = compositor->display_width;
-			rc.h = compositor->display_height;
-			compositor->video_out->Flush(compositor->video_out, &rc);
-			gf_sc_lock(compositor, 1);
+			gf_sc_flush_video(compositor);
 		} else {
 			compositor->skip_flush = 0;
 		}
@@ -2908,6 +2921,7 @@ static Bool gf_sc_on_event_ex(GF_Compositor *compositor , GF_Event *event, Bool 
 			} else {
 				/*remove pending resize notif*/
 				compositor->msg_type &= ~GF_SR_CFG_SET_SIZE;
+                compositor->msg_type &= ~GF_SR_CFG_WINDOWSIZE_NOTIF;
 			}
 			if (lock_ok) gf_sc_lock(compositor, GF_FALSE);
 		}

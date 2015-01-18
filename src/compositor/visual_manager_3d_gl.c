@@ -2542,8 +2542,8 @@ GF_Err compositor_3d_get_screen_buffer(GF_Compositor *compositor, GF_VideoSurfac
 	u32 hy;
 #endif //GPAC_USE_TINYGL
 
-	fb->width = compositor->vp_width;
-	fb->height = compositor->vp_height;
+	fb->width = compositor->display_width;
+	fb->height = compositor->display_height;
 
 	/*depthmap-only dump*/
 	if (depth_dump_mode==1) {
@@ -2646,7 +2646,7 @@ GF_Err compositor_3d_get_screen_buffer(GF_Compositor *compositor, GF_VideoSurfac
 		fb->video_buffer = (char*)gf_malloc(sizeof(char) * fb->pitch_y * fb->height);
 		fb->pixel_format = GF_PIXEL_RGBA;
 
-		glReadPixels(compositor->vp_x, compositor->vp_y, fb->width, fb->height, GL_RGBA, GL_UNSIGNED_BYTE, fb->video_buffer);
+		glReadPixels(0, 0, fb->width, fb->height, GL_RGBA, GL_UNSIGNED_BYTE, fb->video_buffer);
 		/*	} else {
 				fb->pitch_x = 3;
 				fb->pitch_y = 3*compositor->vp_width;

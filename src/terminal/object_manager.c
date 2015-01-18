@@ -282,7 +282,11 @@ void gf_odm_disconnect(GF_ObjectManager *odm, u32 do_remove)
 		evt.type = GF_EVENT_CONNECT;
 		evt.connect.is_connected = GF_FALSE;
 		gf_term_send_event(odm->term, &evt);
-	}
+    }
+    //this is an extra scene not part of the main tree (eg declared from modules), don't post events
+    else if (odm->subscene) {
+        gf_scene_del(odm->subscene);
+    }
 
 	gf_term_lock_net(term, GF_TRUE);
 	/*delete the ODMan*/
@@ -2265,7 +2269,7 @@ void gf_odm_signal_eos(GF_ObjectManager *odm)
 		GF_ObjectManager *root = odm->parentscene->root_od;
 		Bool is_over = 0;
 
-		if (!gf_scene_check_clocks(root->net_service, root->subscene)) return;
+		if (!gf_scene_check_clocks(root->net_service, root->subscene, 0)) return;
 		if (root->subscene->is_dynamic_scene)
 			is_over = 1;
 		else

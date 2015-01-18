@@ -73,8 +73,10 @@ static Bool reload = GF_FALSE;
 #if defined(__DARWIN__) || defined(__APPLE__)
 //we keep no decoder thread because of JS_GC deadlocks between threads ...
 static u32 threading_flags = GF_TERM_NO_COMPOSITOR_THREAD | GF_TERM_NO_DECODER_THREAD;
+#define VK_MOD  GF_KEY_MOD_ALT
 #else
 static u32 threading_flags = 0;
+#define VK_MOD  GF_KEY_MOD_CTRL
 #endif
 static Bool no_audio = GF_FALSE;
 static Bool term_step = GF_FALSE;
@@ -119,6 +121,22 @@ u32 last_x, last_y;
 Bool right_down = GF_FALSE;
 
 void dump_frame(GF_Terminal *term, char *rad_path, u32 dump_type, u32 frameNum);
+
+enum
+{
+	DUMP_NONE = 0,
+	DUMP_AVI = 1,
+	DUMP_BMP = 2,
+	DUMP_PNG = 3,
+	DUMP_RAW = 4,
+	DUMP_SHA1 = 5,
+
+	//DuMP flags
+	DUMP_DEPTH_ONLY = 1<<16,
+	DUMP_RGB_DEPTH = 1<<17,
+	DUMP_RGB_DEPTH_SHAPE = 1<<18
+};
+
 Bool dump_file(char *the_url, char *out_url, u32 dump_mode, Double fps, u32 width, u32 height, Float scale, u32 *times, u32 nb_times);
 
 
@@ -227,6 +245,8 @@ void PrintUsage()
 	        "\t-exit:          automatically exits when presentation is over\n"
 	        "\t-run-for TIME:  runs for TIME seconds and exits\n"
 	        "\t-service ID:    auto-tune to given service ID in a multiplex\n"
+            "\t-noprog:        disable progress report\n"
+            "\t-no-save:       disable saving config file on exit\n"
 	        "\t-no-addon:      disable automatic loading of media addons declared in source URL\n"
 	        "\t-gui:           starts in GUI mode. The GUI is indicated in GPAC config, section General, by the key [StartupFile]\n"
 	        "\n"
@@ -235,6 +255,7 @@ void PrintUsage()
 	        "\t-png [times]:   dumps given frames to png\n"
 	        "\t-raw [times]:   dumps given frames to raw\n"
 	        "\t-avi [times]:   dumps given file to raw avi\n"
+			"\t-sha [times]:   dumps given file to raw SHA-1 (1 hash per frame)\n"
 	        "\r-out filename:  name of the output file\n"
 	        "\t-rgbds:         dumps the RGBDS pixel format texture\n"
 	        "\t                 with -avi [times]: dumps an rgbds-format .avi\n"
@@ -532,8 +553,7 @@ Bool GPAC_EventProc(void *ptr, GF_Event *evt)
 
 	switch (evt->type) {
 	case GF_EVENT_DURATION:
-		Duration = 1000;
-		Duration = (u64) (((s64) Duration) * evt->duration.duration);
+		Duration = (u64) ( 1000 * (s64) evt->duration.duration);
 		CanSeek = evt->duration.can_seek;
 		break;
 	case GF_EVENT_MESSAGE:
@@ -715,21 +735,21 @@ Bool GPAC_EventProc(void *ptr, GF_Event *evt)
 			gf_term_toggle_addons(term, addon_visible);
 			break;
 		case GF_KEY_UP:
-			if (evt->key.flags & GF_KEY_MOD_CTRL && is_connected) {
+			if (evt->key.flags & VK_MOD && is_connected) {
 				playback_speed *= 2;
 				fprintf(stderr, "Playing at %g speed\n", FIX2FLT(playback_speed));
 				gf_term_set_speed(term, playback_speed);
 			}
 			break;
 		case GF_KEY_DOWN:
-			if (evt->key.flags & GF_KEY_MOD_CTRL && is_connected) {
+			if (evt->key.flags & VK_MOD && is_connected) {
 				playback_speed /= 2;
 				fprintf(stderr, "Playing at %g speed\n", FIX2FLT(playback_speed));
 				gf_term_set_speed(term, playback_speed);
 			}
 			break;
 		case GF_KEY_LEFT:
-			if (evt->key.flags & GF_KEY_MOD_CTRL && is_connected) {
+			if (evt->key.flags & VK_MOD && is_connected) {
 				playback_speed = -playback_speed;
 				fprintf(stderr, "Playing at %g speed\n", FIX2FLT(playback_speed));
 				gf_term_set_speed(term, playback_speed);
@@ -1031,6 +1051,8 @@ void set_cfg_option(char *opt_string)
 #include <wincon.h>
 #endif
 
+static void progress_quiet(const void *cbck, const char *title, u64 done, u64 total) { }
+
 int main (int argc, char **argv)
 {
 	char c;
@@ -1042,10 +1064,9 @@ int main (int argc, char **argv)
 	Bool logs_set = GF_FALSE;
 	Bool start_fs = GF_FALSE;
 	Bool use_rtix = GF_FALSE;
-	Bool rgbds_dump = GF_FALSE;
-	Bool rgbd_dump = GF_FALSE;
-	Bool depth_dump = GF_FALSE;
 	Bool pause_at_first = GF_FALSE;
+	Bool no_cfg_safe = GF_FALSE;
+
 	Double play_from = 0;
 #ifdef GPAC_MEMORY_TRACKING
 	Bool enable_mem_tracker = GF_FALSE;
@@ -1064,7 +1085,7 @@ int main (int argc, char **argv)
 
 	memset(&user, 0, sizeof(GF_User));
 
-	dump_mode = 0;
+	dump_mode = DUMP_NONE;
 	fill_ar = visible = GF_FALSE;
 	url_arg = out_arg = the_cfg = rti_file = views = default_com = NULL;
 	nb_times = 0;
@@ -1166,10 +1187,17 @@ int main (int argc, char **argv)
 			gf_cfg_set_key(cfg_file, "Network", "DefaultMCastInterface", argv[i+1]);
 			i++;
 		}
-		else if (!stricmp(arg, "-help")) {
-			PrintUsage();
-			return 1;
-		}
+        else if (!stricmp(arg, "-help")) {
+            PrintUsage();
+            return 1;
+        }
+        else if (!stricmp(arg, "-noprog")) {
+            gf_set_progress_callback(NULL, progress_quiet);
+        }
+        else if (!stricmp(arg, "--no-save")) {
+			no_cfg_safe=1;
+        }
+		
 
 		/*arguments only used in non-gui mode*/
 		else if (!gui_mode) {
@@ -1177,40 +1205,36 @@ int main (int argc, char **argv)
 				url_arg = arg;
 			}
 			else if (!strcmp(arg, "-out")) {
-				out_arg = gf_strdup(argv[i+1]);
+				out_arg = argv[i+1];
+                i++;
 			}
 			else if (!stricmp(arg, "-fps")) {
 				fps = atof(argv[i+1]);
 				i++;
-			} else if (!strcmp(arg, "-avi")) {
-				if (rgbds_dump) dump_mode = 5;
-				else if (depth_dump) dump_mode = 8;
-				else if (rgbd_dump) dump_mode = 10;
-				else dump_mode=1;
+			} else if (!strcmp(arg, "-avi") || !strcmp(arg, "-sha")) {
+				dump_mode &= 0xFFFF0000;
+
+				if (!strcmp(arg, "-sha")) dump_mode |= DUMP_SHA1;
+				else dump_mode |= DUMP_AVI;
+
 				if ((url_arg || (i+2<(u32)argc)) && get_time_list(argv[i+1], times, &nb_times)) i++;
 			} else if (!strcmp(arg, "-rgbds")) { /*get dump in rgbds pixel format*/
-				rgbds_dump = 1;
-				dump_mode=6;                    /* rgbds texture directly*/
-				if (dump_mode==1) dump_mode = 5;    /* .avi rgbds dump*/
+				dump_mode |= DUMP_RGB_DEPTH_SHAPE;
 			} else if (!strcmp(arg, "-rgbd")) { /*get dump in rgbd pixel format*/
-				rgbd_dump = 1;
-				dump_mode=9;  /* rgbd texture directly*/
-				if (dump_mode==1) dump_mode = 10;    /* .avi rgbds dump*/
+				dump_mode |= DUMP_RGB_DEPTH;
 			} else if (!strcmp(arg, "-depth")) {
-				depth_dump = 1;
-				if (dump_mode==2) dump_mode=7; /* grayscale .bmp depth dump*/
-				else if (dump_mode==1) dump_mode=8; /* .avi depth dump*/
-				else if (dump_mode==11)dump_mode=12;
-				else dump_mode=4;   /*depth dump*/
+				dump_mode |= DUMP_DEPTH_ONLY;
 			} else if (!strcmp(arg, "-bmp")) {
-				if(depth_dump) dump_mode=7; /*grayscale depth .bmp dump*/
-				else dump_mode=2;
+				dump_mode &= 0xFFFF0000;
+				dump_mode |= DUMP_BMP;
 				if ((url_arg || (i+2<(u32)argc)) && get_time_list(argv[i+1], times, &nb_times)) i++;
 			} else if (!strcmp(arg, "-png")) {
-				dump_mode=11;
+				dump_mode &= 0xFFFF0000;
+				dump_mode |= DUMP_PNG;
 				if ((url_arg || (i+2<(u32)argc)) && get_time_list(argv[i+1], times, &nb_times)) i++;
 			} else if (!strcmp(arg, "-raw")) {
-				dump_mode = 3;
+				dump_mode &= 0xFFFF0000;
+				dump_mode |= DUMP_RAW;
 				if ((url_arg || (i+2<(u32)argc)) && get_time_list(argv[i+1], times, &nb_times)) i++;
 			} else if (!stricmp(arg, "-scale")) {
 				sscanf(argv[i+1], "%f", &scale);
@@ -1289,6 +1313,10 @@ int main (int argc, char **argv)
 		}
 	}
 
+#if defined(__DARWIN__) || defined(__APPLE__)
+    carbon_init();
+#endif
+    
 
 	if (dump_mode) rti_file = NULL;
 
@@ -1307,8 +1335,10 @@ int main (int argc, char **argv)
 
 	/*setup dumping options*/
 	if (dump_mode) {
-		user.init_flags |= GF_TERM_NO_AUDIO | GF_TERM_NO_DECODER_THREAD | GF_TERM_NO_COMPOSITOR_THREAD | GF_TERM_NO_REGULATION /*| GF_TERM_INIT_HIDE*/;
+		user.init_flags |= GF_TERM_NO_DECODER_THREAD | GF_TERM_NO_COMPOSITOR_THREAD | GF_TERM_NO_REGULATION /*| GF_TERM_INIT_HIDE*/;
 		if (visible || dump_mode==8) user.init_flags |= GF_TERM_INIT_HIDE;
+		gf_cfg_set_key(cfg_file, "Audio", "DriverName", "Raw Audio Output");
+		no_cfg_safe=GF_TRUE;
 	} else {
 		init_w = forced_width;
 		init_h = forced_height;
@@ -1364,10 +1394,6 @@ int main (int argc, char **argv)
 		return 1;
 	}
 	fprintf(stderr, "Terminal Loaded in %d ms\n", gf_sys_clock()-i);
-
-#if defined(__DARWIN__) || defined(__APPLE__)
-	carbon_init();
-#endif
 
 	if (bench_mode) {
 		display_rti = 2;
@@ -1536,7 +1562,13 @@ int main (int argc, char **argv)
 force_input:
 		switch (c) {
 		case 'q':
-			Run = 0;
+			{
+				GF_Event evt;
+				memset(&evt, 0, sizeof(GF_Event));
+				evt.type = GF_EVENT_QUIT;
+				gf_term_send_event(term, &evt);
+			}
+//			Run = 0;
 			break;
 		case 'X':
 			exit(0);
@@ -2075,15 +2107,28 @@ force_input:
 
 	fprintf(stderr, "GPAC cleanup ...\n");
 	gf_modules_del(user.modules);
+
+	if (no_cfg_safe)
+		gf_cfg_discard_changes(cfg_file);
+
 	gf_cfg_del(cfg_file);
 
 	gf_sys_close();
+
 	if (rti_logs) fclose(rti_logs);
 	if (logfile) fclose(logfile);
 
 	if (gui_mode) {
 		hide_shell(2);
 	}
+
+#ifdef GPAC_MEMORY_TRACKING
+	if (enable_mem_tracker && (gf_memory_size() != 0)) {
+        gf_memory_print();
+		return 2;
+	}
+#endif
+
 	return 0;
 }
 
