@@ -228,6 +228,7 @@ GF_AC3Config *gf_isom_ac3_config_get(GF_ISOFile *the_file, u32 trackNumber, u32 
 	return res;
 }
 
+#ifndef GPAC_DISABLE_VTT
 GF_EXPORT
 GF_Err gf_isom_stxt_info_get(GF_ISOFile *the_file, u32 trackNumber, u32 StreamDescriptionIndex, char **mime, char **config)
 {
@@ -249,6 +250,7 @@ GF_Err gf_isom_stxt_info_get(GF_ISOFile *the_file, u32 trackNumber, u32 StreamDe
 	}
 	return GF_OK;
 }
+#endif /*GPAC_DISABLE_VTT*/
 
 
 #ifndef GPAC_DISABLE_ISOM_WRITE

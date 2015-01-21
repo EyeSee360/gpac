@@ -155,6 +155,7 @@ disable_vobsub="no"
 disable_ttxt="no"
 disable_ttml="no"
 disable_hevc="no"
+disable_vtt="no"
 enable_depth_compositor="no"
 enable_renoir="no"
 has_avcap="no"
@@ -296,6 +297,7 @@ Configuration options for libgpac - all options can be enabled with --enable-opt
   --disable-player         disable player (terminal and compositor)
   --disable-scenegraph     disable scenegraph, scene parsers and player (terminal and compositor)
   --disable-hevc           disable HEVC support
+  --disable-vtt            disable VTT support
 
 Extra libraries configuration. You can turn a libray off or force using the local version in gpac/extra_lib/
   --use-js=OPT             force SpiderMonkey ECMAScript OPT=[no,local]
@@ -2064,6 +2066,10 @@ for opt do
             ;;
         --enable-hevc) disable_hevc="no"
             ;; 
+        --disable-vtt) disable_vtt="yes"
+            ;;
+        --enable-vtt) disable_vtt="no"
+            ;;
     esac
 done
 
@@ -2664,6 +2670,10 @@ fi
 if test "$disable_hevc" = "yes" ; then
     echo "HEVC Support disabled"
     echo "#define GPAC_DISABLE_HEVC" >> $TMPH
+fi
+if test "$disable_vtt" = "yes" ; then
+    echo "VTT Support disabled"
+    echo "#define GPAC_DISABLE_VTT" >> $TMPH
 fi
 
 echo ""

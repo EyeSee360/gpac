@@ -4016,6 +4016,7 @@ GF_Err metx_dump(GF_Box *a, FILE * trace)
 	return GF_OK;
 }
 
+#ifndef GPAC_DISABLE_VTT
 GF_Err stxt_dump(GF_Box *a, FILE * trace)
 {
 	GF_SimpleTextSampleEntryBox *ptr = (GF_SimpleTextSampleEntryBox*)a;
@@ -4034,6 +4035,7 @@ GF_Err stxt_dump(GF_Box *a, FILE * trace)
 	fprintf(trace, "</%s>\n", name);
 	return GF_OK;
 }
+#endif /*GPAC_DISABLE_VTT*/
 
 GF_Err dims_dump(GF_Box *a, FILE * trace)
 {

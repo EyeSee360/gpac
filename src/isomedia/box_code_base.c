@@ -7667,6 +7667,8 @@ GF_Err metx_Size(GF_Box *s)
 
 #endif /*GPAC_DISABLE_ISOM_WRITE*/
 
+#ifndef GPAC_DISABLE_VTT
+
 /* SimpleTextSampleEntry */
 GF_Box *stxt_New()
 {
@@ -7807,6 +7809,7 @@ GF_Err stxt_Size(GF_Box *s)
 }
 
 #endif /*GPAC_DISABLE_ISOM_WRITE*/
+#endif /*GPAC_DISABLE_VTT*/
 
 GF_Box *dac3_New(u32 boxType)
 {
