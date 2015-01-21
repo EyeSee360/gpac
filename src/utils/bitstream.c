@@ -139,6 +139,15 @@ GF_BitStream *gf_bs_from_file(FILE *f, u32 mode)
 	gf_f64_seek(f, 0, SEEK_END);
 	tmp->size = gf_f64_tell(f);
 	gf_f64_seek(f, tmp->position, SEEK_SET);
+    
+    if (tmp->position == -1) {
+        tmp->position = 0;
+    }
+    
+    if (tmp->size == -1) {
+        tmp->size = 0;
+    }
+    
 	return tmp;
 }
 
