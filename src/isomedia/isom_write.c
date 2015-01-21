@@ -4074,6 +4074,7 @@ GF_Err gf_isom_set_JPEG2000(GF_ISOFile *mov, Bool set_on)
 	return GF_OK;
 }
 
+GF_EXPORT
 GF_Err gf_isom_remove_uuid(GF_ISOFile *movie, u32 trackNumber, bin128 UUID)
 {
 	u32 i, count;
@@ -4104,7 +4105,7 @@ GF_Err gf_isom_remove_uuid(GF_ISOFile *movie, u32 trackNumber, bin128 UUID)
 	return GF_OK;
 }
 
-
+GF_EXPORT
 GF_Err gf_isom_add_uuid(GF_ISOFile *movie, u32 trackNumber, bin128 UUID, char *data, u32 data_size)
 {
 	GF_List *list;
