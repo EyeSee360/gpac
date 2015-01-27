@@ -1,0 +1,4 @@
+extra_lib/include/platinum/NptDefs.h
+packagers/win32_64/nsis/default.out
+build/xcode/gpac.xcodeproj/xcuserdata
+build/xcode/gpac4ios.xcodeproj/xcuserdata
