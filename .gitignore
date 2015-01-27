@@ -1,4 +1,9 @@
+#These files are deleted/generated on build but do not get cleaned up
 extra_lib/include/platinum/NptDefs.h
 packagers/win32_64/nsis/default.out
 build/xcode/gpac.xcodeproj/xcuserdata
 build/xcode/gpac4ios.xcodeproj/xcuserdata
+config.h
+config.mak
+src/.depend
+src/.deps
