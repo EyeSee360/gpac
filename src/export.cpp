@@ -857,6 +857,8 @@
 #pragma comment (linker, EXPORT_SYMBOL(gf_isom_set_track_id) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_isom_rewrite_track_dependencies) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_isom_add_sample) )
+#pragma comment (linker, EXPORT_SYMBOL(gf_isom_add_sample_from_source) )
+#pragma comment (linker, EXPORT_SYMBOL(gf_isom_copy_sample_info) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_isom_add_sample_shadow) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_isom_append_sample_data) )
 #pragma comment (linker, EXPORT_SYMBOL(gf_isom_refresh_size_info) )

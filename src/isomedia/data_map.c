@@ -66,6 +66,9 @@ void gf_isom_datamap_del(GF_DataMap *ptr)
 	case GF_ISOM_DATA_FILE_MAPPING:
 		gf_isom_fmo_del((GF_FileMappingDataMap *)ptr);
 		break;
+	case GF_ISOM_DATA_FILE_EXTERN_REF:
+		gf_isom_fer_del((GF_FileExternalRefDataMap *)ptr);
+		break;
 	//not implemented
 	default:
 		break;
@@ -184,7 +187,7 @@ GF_Err gf_isom_datamap_new(const char *location, const char *parentPath, u8 mode
 		*outDataMap = gf_isom_fdm_new(sPath, mode);
 #endif
 	} else {
-		*outDataMap = gf_isom_fdm_new(sPath, mode);
+		*outDataMap = gf_isom_fer_new(sPath, mode);
 		if (*outDataMap) {
 			(*outDataMap)->szName = sPath;
 			sPath = NULL;
@@ -283,6 +286,9 @@ u32 gf_isom_datamap_get_data(GF_DataMap *map, char *buffer, u32 bufferLength, u6
 	case GF_ISOM_DATA_FILE_MAPPING:
 		return gf_isom_fmo_get_data((GF_FileMappingDataMap *)map, buffer, bufferLength, Offset);
 
+	case GF_ISOM_DATA_FILE_EXTERN_REF:
+		return gf_isom_fer_get_data((GF_FileExternalRefDataMap *)map, buffer, bufferLength, Offset);
+
 	default:
 		return 0;
 	}
@@ -303,6 +309,10 @@ void gf_isom_datamap_flush(GF_DataMap *map)
 		}
 #endif
 	}
+	else if (map->type==GF_ISOM_DATA_FILE_EXTERN_REF) {
+		GF_FileExternalRefDataMap *fer = (GF_FileExternalRefDataMap *)map;
+		gf_isom_fer_flush(fer);
+	}
 }
 
 #ifndef GPAC_DISABLE_ISOM_WRITE
@@ -318,6 +328,9 @@ u64 gf_isom_datamap_get_offset(GF_DataMap *map)
 	case GF_ISOM_DATA_FILE:
 		return FDM_GetTotalOffset((GF_FileDataMap *)map);
 
+	case GF_ISOM_DATA_FILE_EXTERN_REF:
+		return gf_isom_fer_get_offset((GF_FileExternalRefDataMap *)map);
+
 	default:
 		return 0;
 	}
@@ -331,6 +344,8 @@ GF_Err gf_isom_datamap_add_data(GF_DataMap *ptr, char *data, u32 dataSize)
 	switch (ptr->type) {
 	case GF_ISOM_DATA_FILE:
 		return FDM_AddData((GF_FileDataMap *)ptr, data, dataSize);
+	case GF_ISOM_DATA_FILE_EXTERN_REF:
+		return gf_isom_fer_add_data((GF_FileExternalRefDataMap *)ptr, data, dataSize);
 	default:
 		return GF_NOT_SUPPORTED;
 	}
@@ -554,6 +569,229 @@ GF_Err FDM_AddData(GF_FileDataMap *ptr, char *data, u32 dataSize)
 
 #endif	/*GPAC_DISABLE_ISOM_WRITE*/
 
+GF_DataMap *gf_isom_fer_new(const char *sPath, u8 mode)
+{
+	u8 bs_mode;
+
+	GF_FileExternalRefDataMap *tmp = (GF_FileExternalRefDataMap *) gf_malloc(sizeof(GF_FileExternalRefDataMap));
+	if (!tmp) return NULL;
+	memset(tmp, 0, sizeof(GF_FileExternalRefDataMap));
+	tmp->type = GF_ISOM_DATA_FILE_EXTERN_REF;
+	tmp->mode = mode;
+	tmp->parts = gf_list_new();
+
+#ifndef GPAC_DISABLE_ISOM_WRITE
+	//open a temp file
+	if (!strcmp(sPath, "mp4_tmp_edit")) {
+		//create  a temp file (that only occurs in EDIT/WRITE mode)
+		tmp->stream = gf_temp_file_new();
+		bs_mode = GF_BITSTREAM_READ;
+	}
+#endif
+
+	switch (mode) {
+		case GF_ISOM_DATA_MAP_WRITE:
+			if (!strcmp(sPath, "std")) {
+				tmp->stream = stdout;
+				tmp->is_stdout = 1;
+			}
+			if (!tmp->stream) tmp->stream = gf_f64_open(sPath, "w+b");
+			if (!tmp->stream) tmp->stream = gf_f64_open(sPath, "wb");
+			bs_mode = GF_BITSTREAM_WRITE;
+			break;
+		default:
+			gf_free(tmp);
+			return NULL;
+	}
+	if (!tmp->stream) {
+		gf_free(tmp);
+		return NULL;
+	}
+	tmp->bs = gf_bs_from_file(tmp->stream, bs_mode);
+	if (!tmp->bs) {
+		fclose(tmp->stream);
+		gf_free(tmp);
+		return NULL;
+	}
+	if (default_write_buffering_size) {
+		gf_bs_set_output_buffering(tmp->bs, default_write_buffering_size);
+	}
+	return (GF_DataMap *)tmp;
+
+}
+
+void gf_isom_fer_del(GF_FileExternalRefDataMap *ptr)
+{
+	if (!ptr || (ptr->type != GF_ISOM_DATA_FILE_EXTERN_REF)) return;
+
+//	gf_isom_fer_flush(ptr);
+
+	if (ptr->bs) gf_bs_del(ptr->bs);
+	if (ptr->stream && !ptr->is_stdout)
+		fclose(ptr->stream);
+
+#ifndef GPAC_DISABLE_ISOM_WRITE
+	if (ptr->temp_file) {
+		gf_delete_file(ptr->temp_file);
+		gf_free(ptr->temp_file);
+	}
+
+	if (ptr->parts) {
+		u32 pos = 0;
+		GF_FileExternalDataReference *part = NULL;
+
+		while ((part = gf_list_enum(ptr->parts, &pos))) {
+			free(part);
+		}
+
+		gf_list_del(ptr->parts);
+	}
+#endif
+	gf_free(ptr);
+
+}
+
+static u32 FER_ReadPart(GF_FileExternalDataReference *part, char *buffer, u32 bufferLength, u32 offsetIntoPart)
+{
+	u32 readLength;
+	u64 oldOffset;
+
+	if (!part || !buffer) {
+		return 0;
+	}
+
+	readLength = part->length - offsetIntoPart;
+	if (readLength > bufferLength) {
+		readLength = bufferLength;
+	}
+
+	GF_BitStream *bs = part->bitstream;
+	oldOffset = gf_bs_get_position(bs);
+	gf_bs_seek(bs, part->offset + offsetIntoPart);
+	readLength = gf_bs_read_data(bs, buffer, readLength);
+	gf_bs_seek(bs, oldOffset);
+
+	return readLength;
+}
+
+static u32 FER_FlushPart(GF_FileExternalDataReference *part, GF_BitStream *outBS, u32 length)
+{
+	char data[length];
+	u32 *data32;
+
+	if (part->bitstream) {
+		FER_ReadPart(part, data, length, 0);
+
+		data32 = (u32 *)data;
+//		fprintf(stderr, "File part @ %lld (%d bytes): %08x %08x ...\n", gf_bs_get_position(outBS), length, data32[0], data32[1]);
+
+		gf_bs_write_data(outBS, data, length);
+	} else {
+		data32 = (u32 *)part->data;
+//		fprintf(stderr, "Data part @ %lld (%d bytes): %08x %08x ...\n", gf_bs_get_position(outBS), length, data32[0], data32[1]);
+
+		gf_bs_write_data(outBS, part->data, length);
+	}
+
+	return length;
+}
+
+u32 gf_isom_fer_get_data(GF_FileExternalRefDataMap *ptr, char *buffer, u32 bufferLength, u64 fileOffset)
+{
+	// seek through parts until we reach the desired offset
+	u32 pos = 0;
+	u32 readLength = 0;
+	GF_FileExternalDataReference *part = NULL;
+	GF_List *partList = ptr->parts;
+	char *cursor = buffer;
+
+	while ((part = gf_list_enum(partList, &pos))) {
+		if (part->length >= fileOffset) {
+			u32 partSize = FER_ReadPart(part, cursor, bufferLength, (u32)fileOffset);
+			cursor += partSize;
+			bufferLength -= partSize;
+			readLength += partSize;
+			if (bufferLength <= 0) break;
+		}
+		fileOffset -= part->length;
+	}
+
+	return readLength;
+}
+
+u64 gf_isom_fer_get_offset(GF_FileExternalRefDataMap *map)
+{
+	u32 pos = 0;
+	u64 totalLength = 0;
+	GF_FileExternalDataReference *part = NULL;
+
+	while ((part = gf_list_enum(map->parts, &pos))) {
+		totalLength += part->length;
+	}
+
+	return totalLength;
+}
+
+GF_Err gf_isom_fer_add_data(GF_FileExternalRefDataMap *ptr, char *data, u32 dataSize)
+{
+	// right now data must be memory-backed. We could store in a temp file instead.
+	GF_FileExternalDataReference *part = (GF_FileExternalDataReference *) malloc(sizeof(GF_FileExternalDataReference));
+	if (!part) return GF_OUT_OF_MEM;
+
+	memset(part, 0, sizeof(GF_FileExternalDataReference));
+
+	part->length = dataSize;
+	part->data = malloc(dataSize);
+	memcpy(part->data, data, dataSize);
+
+	gf_list_add(ptr->parts, part);
+
+	return GF_OK;
+}
+
+GF_Err gf_isom_datamap_add_file_data(GF_DataMap *ptr, GF_BitStream *srcBitstream, u64 offset, u32 dataSize)
+{
+	if (!ptr) return GF_BAD_PARAM;
+
+	switch (ptr->type) {
+			//file-based
+		case GF_ISOM_DATA_FILE_EXTERN_REF:
+			return gf_isom_fer_add_file_data((GF_FileExternalRefDataMap *)ptr, srcBitstream, offset, dataSize);
+
+		default:
+			return GF_BAD_PARAM;
+	}
+}
+
+GF_Err gf_isom_fer_add_file_data(GF_FileExternalRefDataMap *ptr, GF_BitStream *srcBitstream, u64 offset, u32 dataSize)
+{
+	// right now data must be memory-backed. We could store in a temp file instead.
+	GF_FileExternalDataReference *part = (GF_FileExternalDataReference *) malloc(sizeof(GF_FileExternalDataReference));
+	if (!part) return GF_OUT_OF_MEM;
+
+	memset(part, 0, sizeof(GF_FileExternalDataReference));
+
+	part->bitstream = srcBitstream;
+	part->length = dataSize;
+	part->offset = offset;
+
+	gf_list_add(ptr->parts, part);
+
+	return GF_OK;
+}
+
+void gf_isom_fer_flush(GF_FileExternalRefDataMap *map)
+{
+	u32 pos = 0;
+	u64 totalLength = 0;
+	GF_FileExternalDataReference *part = NULL;
+	GF_List *partList = map->parts;
+	GF_BitStream *outBS = map->bs;
+
+	while ((part = gf_list_enum(partList, &pos))) {
+		totalLength += FER_FlushPart(part, outBS, part->length);
+	}
+}
 
 #ifdef WIN32
 

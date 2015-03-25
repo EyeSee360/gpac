@@ -2419,6 +2419,8 @@ typedef struct
 #define GF_ISOM_DATA_FILE_MAPPING		0x02
 /*External file object. Needs implementation*/
 #define GF_ISOM_DATA_FILE_EXTERN		0x03
+/*Data already in an external file, copied by reference*/
+#define GF_ISOM_DATA_FILE_EXTERN_REF	0x04
 
 /*Data Map modes*/
 enum
@@ -2471,6 +2473,26 @@ typedef struct
 	u64 byte_pos;
 } GF_FileMappingDataMap;
 
+typedef struct
+{
+	GF_BitStream *bitstream;
+	char *data;
+	u64 offset;
+	u32 length;
+} GF_FileExternalDataReference;
+
+typedef struct
+{
+	GF_ISOM_BASE_DATA_HANDLER
+	FILE *stream;
+	Bool is_stdout;
+	Bool last_acces_was_read;
+#ifndef GPAC_DISABLE_ISOM_WRITE
+	char *temp_file;
+	GF_List *parts;
+#endif
+} GF_FileExternalRefDataMap;
+
 GF_Err gf_isom_datamap_new(const char *location, const char *parentPath, u8 mode, GF_DataMap **outDataMap);
 void gf_isom_datamap_del(GF_DataMap *ptr);
 GF_Err gf_isom_datamap_open(GF_MediaBox *minf, u32 dataRefIndex, u8 Edit);
@@ -2495,6 +2517,16 @@ u32 gf_isom_fmo_get_data(GF_FileMappingDataMap *ptr, char *buffer, u32 bufferLen
 u64 gf_isom_datamap_get_offset(GF_DataMap *map);
 GF_Err gf_isom_datamap_add_data(GF_DataMap *ptr, char *data, u32 dataSize);
 #endif
+
+/*file-mapping, external reference*/
+GF_DataMap *gf_isom_fer_new(const char *sPath, u8 mode);
+void gf_isom_fer_del(GF_FileExternalRefDataMap *ptr);
+u32 gf_isom_fer_get_data(GF_FileExternalRefDataMap *ptr, char *buffer, u32 bufferLength, u64 fileOffset);
+u64 gf_isom_fer_get_offset(GF_FileExternalRefDataMap *map);
+GF_Err gf_isom_fer_add_data(GF_FileExternalRefDataMap *ptr, char *data, u32 dataSize);
+GF_Err gf_isom_datamap_add_file_data(GF_DataMap *ptr, GF_BitStream *srcBitstream, u64 offset, u32 dataSize);
+GF_Err gf_isom_fer_add_file_data(GF_FileExternalRefDataMap *ptr, GF_BitStream *srcBitstream, u64 offset, u32 dataSize);
+void gf_isom_fer_flush(GF_FileExternalRefDataMap *map);
 
 void gf_isom_datamap_flush(GF_DataMap *map);
 
