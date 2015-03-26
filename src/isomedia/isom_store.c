@@ -774,14 +774,25 @@ GF_Err WriteFlat(MovieWriter *mw, u8 moovFirst, GF_BitStream *bs)
 		e = gf_isom_box_write((GF_Box *)movie->pdin, bs);
 		if (e) goto exit;
 	}
+
+	//prioritize uuid boxes
+	i=0;
+	while ((a = (GF_Box*)gf_list_enum(movie->TopBoxes, &i))) {
+		if (a->type == GF_ISOM_BOX_TYPE_UUID) {
+			e = gf_isom_box_size(a);
+			if (e) goto exit;
+			e = gf_isom_box_write(a, bs);
+			if (e) goto exit;
+		}
+	}
+
 	//What we will do is first emulate the write from the begining...
 	//note: this will set the size of the mdat
 	e = DoWrite(mw, writers, bs, 1, gf_bs_get_position(bs));
 	if (e) goto exit;
 
 	firstSize = GetMoovAndMetaSize(movie, writers);
-	//offset = (firstSize > 0xFFFFFFFF ? firstSize + 8 : firstSize) + 8 + (movie->mdat->dataSize > 0xFFFFFFFF ? 8 : 0);
-	offset = firstSize + 8 + (movie->mdat->dataSize > 0xFFFFFFFF ? 8 : 0);
+	offset = gf_bs_get_position(bs) + firstSize + 8 + (movie->mdat->dataSize > 0xFFFFFFFF ? 8 : 0);
 	e = ShiftOffset(movie, writers, offset);
 	if (e) goto exit;
 	//get the size and see if it has changed (eg, we moved to 64 bit offsets)
@@ -789,8 +800,7 @@ GF_Err WriteFlat(MovieWriter *mw, u8 moovFirst, GF_BitStream *bs)
 	if (firstSize != finalSize) {
 		//we need to remove our offsets
 		ResetWriters(writers);
-		//finalOffset = (finalSize > 0xFFFFFFFF ? finalSize + 8 : finalSize) + 8 + (movie->mdat->dataSize > 0xFFFFFFFF ? 8 : 0);
-		finalOffset = finalSize + 8 + (movie->mdat->dataSize > 0xFFFFFFFF ? 8 : 0);
+		finalOffset = gf_bs_get_position(bs) + finalSize + 8 + (movie->mdat->dataSize > 0xFFFFFFFF ? 8 : 0);
 		//OK, now we're sure about the final size.
 		//we don't need to re-emulate, as the only thing that changed is the offset
 		//so just shift the offset
@@ -800,16 +810,16 @@ GF_Err WriteFlat(MovieWriter *mw, u8 moovFirst, GF_BitStream *bs)
 	//now write our stuff
 	e = WriteMoovAndMeta(movie, writers, bs);
 	if (e) goto exit;
-	e = gf_isom_box_size((GF_Box *)movie->mdat);
-	if (e) goto exit;
+
+	// use the datamap's size for mdat (add space for the header)
+	movie->mdat->size = gf_isom_datamap_get_offset(movie->editFileMap) + 8 + (movie->mdat->dataSize > 0xFFFFFFFF ? 8 : 0);
+
 	e = gf_isom_box_write((GF_Box *)movie->mdat, bs);
 	if (e) goto exit;
 
-	//we don't need the offset as the moov is already written...
-	ResetWriters(writers);
-	e = DoWrite(mw, writers, bs, 0, 0);
-	if (e) goto exit;
-	//then the rest
+	// the datamap already has the movie data in order, don't need the "DoWrite" call.
+	gf_isom_datamap_flush(movie->editFileMap);
+
 	i=0;
 	while ((a = (GF_Box*)gf_list_enum(movie->TopBoxes, &i))) {
 		switch (a->type) {
@@ -818,6 +828,7 @@ GF_Err WriteFlat(MovieWriter *mw, u8 moovFirst, GF_BitStream *bs)
 		case GF_ISOM_BOX_TYPE_FTYP:
 		case GF_ISOM_BOX_TYPE_PDIN:
 		case GF_ISOM_BOX_TYPE_MDAT:
+		case GF_ISOM_BOX_TYPE_UUID:
 			break;
 		default:
 			e = gf_isom_box_size(a);
@@ -1274,15 +1285,16 @@ GF_Err WriteToFile(GF_ISOFile *movie)
 
 	if (movie->openMode == GF_ISOM_OPEN_READ) return GF_BAD_PARAM;
 
-	e = gf_isom_insert_copyright(movie);
-	if (e) return e;
+//	e = gf_isom_insert_copyright(movie);
+//	if (e) return e;
 
 	memset(&mw, 0, sizeof(mw));
 	mw.movie = movie;
 
 	//capture mode: we don't need a new bitstream
 	if (movie->openMode == GF_ISOM_OPEN_WRITE) {
-		e = WriteFlat(&mw, 0, movie->editFileMap->bs);
+		// Fly: We want moov first in our case
+		e = WriteFlat(&mw, 1, movie->editFileMap->bs);
 	} else {
 		u32 buffer_size = movie->editFileMap ? gf_bs_get_output_buffering(movie->editFileMap->bs) : 0;
 		Bool is_stdout = 0;
