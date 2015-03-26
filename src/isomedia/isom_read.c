@@ -1474,8 +1474,6 @@ GF_Err gf_isom_get_sample_for_media_time(GF_ISOFile *the_file, u32 trackNumber, 
 	GF_SampleTableBox *stbl;
 	u8 useShadow, IsSync;
 
-	if (!sample) return GF_BAD_PARAM;
-
 	if (SampleNum) *SampleNum = 0;
 	trak = gf_isom_get_track_from_file(the_file, trackNumber);
 	if (!trak) return GF_BAD_PARAM;
@@ -1566,8 +1564,10 @@ GF_Err gf_isom_get_sample_for_media_time(GF_ISOFile *the_file, u32 trackNumber, 
 
 	//OK sampleNumber is exactly the sample we need (except for shadow)
 
-	*sample = gf_isom_sample_new();
-	if (*sample == NULL) return GF_OUT_OF_MEM;
+    if (sample) {
+        *sample = gf_isom_sample_new();
+        if (*sample == NULL) return GF_OUT_OF_MEM;
+    }
 
 	//we are in shadow mode, we need to browse both SyncSample and ShadowSyncSample to get
 	//the desired sample...
@@ -1585,11 +1585,14 @@ GF_Err gf_isom_get_sample_for_media_time(GF_ISOFile *the_file, u32 trackNumber, 
 		}
 	}
 
-	e = Media_GetSample(trak->Media, sampleNumber, sample, StreamDescriptionIndex, 0, NULL);
-	if (e) {
-		gf_isom_sample_del(sample);
-		return e;
-	}
+    if (sample) {
+        e = Media_GetSample(trak->Media, sampleNumber, sample, StreamDescriptionIndex, 0, NULL);
+        if (e) {
+            gf_isom_sample_del(sample);
+            return e;
+        }
+    }
+
 	//optionally get the sample number
 	if (SampleNum) {
 		*SampleNum = sampleNumber;
@@ -1599,7 +1602,7 @@ GF_Err gf_isom_get_sample_for_media_time(GF_ISOFile *the_file, u32 trackNumber, 
 	}
 
 	//in shadow mode, we only get the data of the shadowing sample !
-	if (useShadow) {
+	if (useShadow && sample) {
 		//we have to use StreamDescriptionIndex in case the sample data is in another desc
 		//though this is unlikely as non optimized...
 		shadow = gf_isom_get_sample(the_file, trackNumber, shadowSync, StreamDescriptionIndex);
