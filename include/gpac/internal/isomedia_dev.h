@@ -2490,6 +2490,7 @@ typedef struct
 #ifndef GPAC_DISABLE_ISOM_WRITE
 	char *temp_file;
 	GF_List *parts;
+    u64 offset;
 #endif
 } GF_FileExternalRefDataMap;
 

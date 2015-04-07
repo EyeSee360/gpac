@@ -723,11 +723,16 @@ u64 gf_isom_fer_get_offset(GF_FileExternalRefDataMap *map)
 {
 	u32 pos = 0;
 	u64 totalLength = 0;
-	GF_FileExternalDataReference *part = NULL;
 
-	while ((part = gf_list_enum(map->parts, &pos))) {
-		totalLength += part->length;
-	}
+    if (map->offset == 0) {
+        GF_FileExternalDataReference *part = NULL;
+
+        while ((part = gf_list_enum(map->parts, &pos))) {
+            totalLength += part->length;
+        }
+    } else {
+        return map->offset;
+    }
 
 	return totalLength;
 }
@@ -745,6 +750,7 @@ GF_Err gf_isom_fer_add_data(GF_FileExternalRefDataMap *ptr, char *data, u32 data
 	memcpy(part->data, data, dataSize);
 
 	gf_list_add(ptr->parts, part);
+    ptr->offset += dataSize;
 
 	return GF_OK;
 }
@@ -776,6 +782,7 @@ GF_Err gf_isom_fer_add_file_data(GF_FileExternalRefDataMap *ptr, GF_BitStream *s
 	part->offset = offset;
 
 	gf_list_add(ptr->parts, part);
+    ptr->offset += dataSize;
 
 	return GF_OK;
 }
