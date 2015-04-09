@@ -55,7 +55,10 @@ void gf_isom_datamap_del(GF_DataMap *ptr)
 {
 	if (!ptr) return;
 
-	if (ptr->szName) gf_free(ptr->szName);
+    if (ptr->szName) {
+        gf_free(ptr->szName);
+        ptr->szName = NULL;
+    }
 
 	//then delete the structure itself....
 	switch (ptr->type) {
@@ -189,7 +192,7 @@ GF_Err gf_isom_datamap_new(const char *location, const char *parentPath, u8 mode
 	} else {
 		*outDataMap = gf_isom_fer_new(sPath, mode);
 		if (*outDataMap) {
-			(*outDataMap)->szName = sPath;
+			(*outDataMap)->szName = strdup(sPath);
 			sPath = NULL;
 		}
 	}
