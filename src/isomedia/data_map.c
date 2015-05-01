@@ -801,6 +801,8 @@ void gf_isom_fer_flush(GF_FileExternalRefDataMap *map)
 	while ((part = gf_list_enum(partList, &pos))) {
 		totalLength += FER_FlushPart(part, outBS, part->length);
 	}
+
+    gf_bs_flush(outBS);
 }
 
 #ifdef WIN32
